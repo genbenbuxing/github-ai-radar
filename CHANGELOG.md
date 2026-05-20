@@ -4,6 +4,15 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.3.0] - 2026-05-20
+
+### Added
+
+- Local HTML dashboard for browsing report status, generated Markdown, audit JSON, and recent repository reviews.
+- `serve` command for starting the dashboard on `127.0.0.1`.
+- macOS `.app` launcher install/status/uninstall commands.
+- README instructions for opening GitHub AI Radar as a local app.
+
 ## [0.2.0] - 2026-05-20
 
 ### Added
