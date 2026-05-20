@@ -18,7 +18,7 @@ github-ai-radar run --once
 github-ai-radar status
 ```
 
-The CLI owns local directories, SQLite, reports, and recovery state.
+The CLI owns local directories, SQLite, reports, and run state files.
 
 Implemented in v0.2:
 
@@ -54,11 +54,22 @@ github-ai-radar serve
 
 Responsibilities:
 
-- run scheduler loop
 - expose local report index
 - show watchlist and decisions
 - provide health status
 - avoid duplicate concurrent runs
+
+Implemented in v0.3-v0.4:
+
+- local dashboard on `127.0.0.1`
+- manual report generation from the UI
+- report, audit JSON, status, stage, and log browsing
+- direct settings forms for run parameters, topics, GitHub queries, scoring, and LLM API
+
+Still planned:
+
+- service-owned timezone-aware scheduler loop
+- richer watchlist and decision views
 
 ## Stage 4: Desktop App
 
@@ -78,6 +89,18 @@ The desktop app should manage:
 - scheduler install/uninstall
 - manual run/retry
 - local backup/export
+
+Implemented in v0.4:
+
+- macOS `.app` installed under `~/Applications`
+- native WebKit app window when Swift is available
+- fallback launcher when Swift is not available
+
+Still planned:
+
+- signed and notarized distributable app package
+- fully self-contained runtime bundle that does not depend on a developer Python environment
+- drag-and-drop `.dmg` or `.pkg` installer
 
 ## Stage 5: Optional Codex Integration
 

@@ -1,7 +1,7 @@
 # Add or edit collection directions here without changing Python code.
-# Keep topics concise; each topic can contribute GitHub and external-source
-# query text. The current pipeline uses GitHub queries from queries.toml, and
-# this file is reserved for the next source-expansion step.
+# Keep topics concise. Current reports use github_terms immediately. source_terms
+# are saved as planning fields for the next external-source collector and do not
+# affect today's report.
 
 [[topics]]
 name = "ai_applications"
