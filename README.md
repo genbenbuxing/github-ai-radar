@@ -39,7 +39,13 @@ Requirements:
 gh auth login
 ```
 
-Install from a local checkout:
+Install from the release tag with `pipx`:
+
+```bash
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.2.0"
+```
+
+Or install from a local checkout:
 
 ```bash
 git clone https://github.com/genbenbuxing/github-ai-radar.git
@@ -47,6 +53,12 @@ cd github-ai-radar
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
+```
+
+You can also download the wheel from GitHub Releases and install it directly:
+
+```bash
+python -m pip install github_ai_radar-0.2.0-py3-none-any.whl
 ```
 
 Initialize local state:
