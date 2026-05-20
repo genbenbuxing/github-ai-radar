@@ -4,6 +4,14 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.3.2] - 2026-05-20
+
+### Added
+
+- Friendlier settings guide for non-coders, including what to change, where to change it, and what to do after saving.
+- LLM setup instructions directly in the settings page.
+- README user guide covering app usage, LLM setup, schedules, result harvesting, run monitoring, and CLI equivalents.
+
 ## [0.3.1] - 2026-05-20
 
 ### Added
