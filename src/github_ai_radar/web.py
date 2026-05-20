@@ -291,27 +291,20 @@ def _save_topics(paths: RadarPaths, values: dict[str, list[str]]) -> str:
 def _save_queries(paths: RadarPaths, values: dict[str, list[str]]) -> str:
     payload = load_config_file(paths.root, "queries.toml")
     github_count = _parse_bounded_int(values, "github_query_count", 0, 0, 200)
-    source_count = _parse_bounded_int(values, "source_query_count", 0, 0, 200)
     github_queries: list[dict[str, str]] = []
-    source_queries: list[dict[str, str]] = []
     for index in range(github_count):
         name = _form_value(values, f"github_query_{index}_name")
         query = _form_value(values, f"github_query_{index}_query")
         if name and query:
             github_queries.append({"name": name, "query": query})
-    for index in range(source_count):
-        name = _form_value(values, f"source_query_{index}_name")
-        query = _form_value(values, f"source_query_{index}_query")
-        if name and query:
-            source_queries.append({"name": name, "query": query})
     new_name = _form_value(values, "new_github_query_name")
     new_query = _form_value(values, "new_github_query")
     if new_name and new_query:
         github_queries.append({"name": new_name, "query": new_query})
     payload["github_queries"] = github_queries
-    payload["source_queries"] = source_queries
+    payload["source_queries"] = payload.get("source_queries", [])
     write_config_file(paths.root, "queries.toml", payload)
-    return "查询规则已保存。"
+    return "GitHub 查询规则已保存。外部来源查询是下一阶段预留项，本次未改动。"
 
 
 def _save_scoring(paths: RadarPaths, values: dict[str, list[str]]) -> str:
@@ -734,8 +727,16 @@ def _topics_form(config: object) -> str:
   </div>
   <div><label>说明</label>{_field(prefix + "description", item.get("description", ""))}</div>
   <div class="row">
-    <div><label>GitHub 关键词，每行一个</label>{_textarea(prefix + "github_terms", _list_to_text(item.get("github_terms")), rows=5)}</div>
-    <div><label>外部来源关键词，每行一个</label>{_textarea(prefix + "source_terms", _list_to_text(item.get("source_terms")), rows=5)}</div>
+    <div>
+      <label>GitHub 关键词，每行一个</label>
+      {_textarea(prefix + "github_terms", _list_to_text(item.get("github_terms")), rows=5)}
+      <div class="muted">当前版本会立即用于 GitHub 项目搜索。</div>
+    </div>
+    <div>
+      <label>外部来源关键词（下一阶段预留）</label>
+      {_textarea(prefix + "source_terms", _list_to_text(item.get("source_terms")), rows=5)}
+      <div class="muted">当前版本不会自动采集新闻、公告、监管文件或论文来源；这里先保留给后续事件雷达。</div>
+    </div>
   </div>
 </div>
 """
@@ -751,8 +752,8 @@ def _topics_form(config: object) -> str:
       <div><label>说明</label>{_field("new_topic_description", "")}</div>
     </div>
     <div class="row">
-      <div><label>GitHub 关键词，每行一个</label>{_textarea("new_topic_github_terms", "", rows=4)}</div>
-      <div><label>外部来源关键词，每行一个</label>{_textarea("new_topic_source_terms", "", rows=4)}</div>
+      <div><label>GitHub 关键词，每行一个</label>{_textarea("new_topic_github_terms", "", rows=4)}<div class="muted">当前版本会立即用于 GitHub 搜索。</div></div>
+      <div><label>外部来源关键词（下一阶段预留）</label>{_textarea("new_topic_source_terms", "", rows=4)}<div class="muted">先记录方向，暂不参与当前报告生成。</div></div>
     </div>
   </div>
   <div class="actions"><button class="button" type="submit">保存采集方向</button></div>
@@ -762,7 +763,6 @@ def _topics_form(config: object) -> str:
 
 def _queries_form(config: object) -> str:
     github_items = []
-    source_items = []
     github_queries = getattr(config, "github_queries")
     source_queries = getattr(config, "source_queries")
     for index, item in enumerate(github_queries):
@@ -775,21 +775,19 @@ def _queries_form(config: object) -> str:
 </div>
 """
         )
-    for index, item in enumerate(source_queries):
-        prefix = f"source_query_{index}_"
-        source_items.append(
-            f"""
-<div class="editable-item">
-  <div><label>名称</label>{_field(prefix + "name", item.get("name", ""))}</div>
-  <div><label>外部来源查询语句</label>{_textarea(prefix + "query", item.get("query", ""), rows=2)}</div>
-</div>
-"""
-        )
+    source_rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(item.get('name') or '-'))}</td>"
+        f"<td>{html.escape(str(item.get('query') or '-'))}</td>"
+        '<td><span class="pill warn">预留</span></td>'
+        "</tr>"
+        for item in source_queries
+    ) or '<tr><td colspan="3" class="muted">还没有预留的外部来源查询。</td></tr>'
     return f"""
 <form method="post" action="/actions/settings/queries" class="settings-form">
   <input type="hidden" name="github_query_count" value="{len(github_queries)}">
-  <input type="hidden" name="source_query_count" value="{len(source_queries)}">
-  <h3>GitHub 查询</h3>
+  <h3>当前生效：GitHub 查询</h3>
+  <p class="muted">这些查询会在下一次报告中立即用于检索 GitHub 仓库。适合写明确的 GitHub 搜索语法，例如 <span class="file-chip">stars:&gt;=50</span>、<span class="file-chip">created:&gt;=${{date_minus_14}}</span>、<span class="file-chip">pushed:&gt;=${{date_minus_30}}</span>。</p>
   <div class="editable-list">{''.join(github_items)}</div>
   <div class="editable-item">
     <h3>新增 GitHub 查询</h3>
@@ -798,8 +796,12 @@ def _queries_form(config: object) -> str:
       <div><label>查询语句</label>{_textarea("new_github_query", "", rows=2)}</div>
     </div>
   </div>
-  <h3>外部来源查询</h3>
-  <div class="editable-list">{''.join(source_items)}</div>
+  <h3>下一阶段预留：外部来源查询</h3>
+  <div class="helper">当前发布版只做 GitHub 项目雷达，不会自动抓取新闻、公告、监管文件或论文来源。下面的外部查询会保留在配置中，但不会参与本次报告生成，避免把未接入的数据源误当成已启用功能。</div>
+  <table>
+    <thead><tr><th>名称</th><th>预留查询</th><th>状态</th></tr></thead>
+    <tbody>{source_rows}</tbody>
+  </table>
   <div class="actions"><button class="button" type="submit">保存查询规则</button></div>
 </form>
 """
@@ -979,13 +981,13 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
 
 <section class="section panel">
   <h2>采集方向</h2>
-  <p class="muted">采集方向是“你关心什么”。这里适合添加新行业、新技术、新公司类型或自定义关键词。</p>
+  <p class="muted">采集方向是“你关心什么”。GitHub 关键词会立即用于项目搜索；外部来源关键词仅作为下一阶段事件雷达预留。</p>
   {_topics_form(config)}
 </section>
 
 <section class="section panel">
   <h2>GitHub 查询</h2>
-  <p class="muted">GitHub 查询是“怎么找”。如果你只是添加兴趣方向，优先改采集方向；如果你明确知道 GitHub 搜索语法，再改这里。</p>
+  <p class="muted">GitHub 查询是“怎么找”。如果你只是添加兴趣方向，优先改采集方向；如果你明确知道 GitHub 搜索语法，再改这里。外部新闻和公告采集尚未启用，相关配置只做留档。</p>
   {_queries_form(config)}
 </section>
 """

@@ -94,6 +94,9 @@ query = "memory agent rag pushed:>=${date_minus_30} stars:>=50 archived:false fo
 name = "ai_drug_discovery"
 query = "AI drug discovery pushed:>=${date_minus_120} stars:>=50 archived:false fork:false"
 
+# Reserved for the next external-source collector. Current reports do not use
+# source_queries; the dashboard shows them as planned fields to avoid implying
+# that news, filings, announcements, or papers are being collected today.
 [[source_queries]]
 name = "finance_high_tech"
 query = "AI high technology finance chips cloud earnings regulation latest official source"
@@ -132,7 +135,10 @@ seven_day_growth_min_history_days = 7
 thirty_day_growth_min_history_days = 30
 """
 
-TOPICS_TOML = """[[topics]]
+TOPICS_TOML = """# Current reports use github_terms immediately. source_terms are saved
+# as planning fields for the next external-source collector.
+
+[[topics]]
 name = "ai_applications"
 enabled = true
 description = "AI applications, agents, local operation, memory, vision, RAG, MCP, workflow automation, and developer tooling."

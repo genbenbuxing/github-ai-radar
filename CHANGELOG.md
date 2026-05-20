@@ -4,6 +4,15 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.4.1] - 2026-05-20
+
+### Fixed
+
+- Clarified no-code UI copy so external source settings are shown as planned fields instead of active report controls.
+- Preserved reserved `source_queries` when editing active GitHub queries from the dashboard.
+- Marked failed pipeline runs in state JSON and the local run table so the UI does not leave interrupted jobs looking active.
+- Aligned README and docs with the current product boundary: GitHub project radar now, official-source event collection later.
+
 ## [0.4.0] - 2026-05-20
 
 ### Added

@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from github_ai_radar.app_launcher import macos_app_status
 from github_ai_radar.config import load_config, llm_status
 from github_ai_radar.paths import RadarPaths
+from github_ai_radar.pipeline import run_once
 from github_ai_radar.storage import initialize
-from github_ai_radar.web import _save_llm_settings, _save_radar_settings, render_dashboard, render_settings
+from github_ai_radar.web import _save_llm_settings, _save_queries, _save_radar_settings, render_dashboard, render_settings
 
 
 def test_dashboard_renders_report_links(tmp_path):
@@ -37,6 +40,8 @@ def test_settings_page_has_direct_save_forms(tmp_path):
     assert 'action="/actions/settings/llm"' in html
     assert 'action="/actions/settings/topics"' in html
     assert 'action="/actions/settings/queries"' in html
+    assert "当前发布版只做 GitHub 项目雷达" in html
+    assert "外部来源查询语句" not in html
     assert "打开 LLM 设置" not in html
 
 
@@ -86,6 +91,40 @@ def test_direct_llm_settings_save_writes_private_secret(tmp_path):
     assert status["api_key_env"] == "EXAMPLE_API_KEY"
     assert status["api_key_present"] is True
     assert (tmp_path / "config" / "secrets.env").exists()
+
+
+def test_direct_query_save_preserves_reserved_source_queries(tmp_path):
+    paths = RadarPaths.from_root(tmp_path)
+    paths.ensure()
+
+    before = load_config(tmp_path)
+    _save_queries(
+        paths,
+        {
+            "github_query_count": ["1"],
+            "github_query_0_name": ["custom_ai"],
+            "github_query_0_query": ["ai agent stars:>=10 archived:false fork:false"],
+            "new_github_query_name": [""],
+            "new_github_query": [""],
+        },
+    )
+
+    after = load_config(tmp_path)
+    assert after.github_queries == [
+        {"name": "custom_ai", "query": "ai agent stars:>=10 archived:false fork:false"}
+    ]
+    assert after.source_queries == before.source_queries
+
+
+def test_failed_run_marks_state_failed(tmp_path):
+    with pytest.raises(Exception):
+        run_once(tmp_path, timezone="Invalid/Zone")
+
+    states = list((tmp_path / "reports" / "github-radar" / "state").glob("*.state.json"))
+    assert states
+    state = json.loads(states[0].read_text(encoding="utf-8"))
+    assert state["status"] == "failed"
+    assert state["errors"]
 
 
 def test_macos_app_status_uses_user_applications_dir(tmp_path, monkeypatch):

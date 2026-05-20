@@ -1,8 +1,10 @@
 # GitHub AI Radar
 
-**A local, auditable radar for GitHub AI projects and frontier AI signals.**
+**A local, auditable radar for GitHub AI projects.**
 
 GitHub AI Radar helps you discover and track open-source projects in AI applications, agents, computer use, memory, RAG, MCP, image recognition, AI biopharma, and high-tech finance. It stores structured snapshots locally, scores candidates conservatively, and generates daily Markdown plus audit JSON reports.
+
+Current release boundary: the working product is a GitHub project radar. Finance/high-tech and biopharma event sections are present in the report structure, but automatic external news, announcement, regulatory, and paper collection is not enabled yet. Those external-source settings are kept as next-stage planning fields so the app does not pretend to have collected sources it has not actually read.
 
 The app is intentionally local-first. Your database, reports, watchlist, and API configuration stay on your machine.
 
@@ -18,6 +20,7 @@ The app is intentionally local-first. Your database, reports, watchlist, and API
 - Installs a macOS `.app` launcher so the dashboard can be opened from Finder, Spotlight, or Launchpad.
 - Installs a macOS `launchd` schedule so daily runs can happen without Codex.
 - Supports optional local LLM configuration for future deeper analysis through OpenAI-compatible APIs.
+- Keeps external finance, high-tech, and biopharma source queries as visible planned fields, but does not use them until the official-source collector is implemented.
 
 ## Safety Model
 
@@ -44,7 +47,7 @@ gh auth login
 Install from the release tag with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.4.0"
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.4.1"
 ```
 
 Or install from a local checkout:
@@ -60,7 +63,7 @@ pip install -e .
 You can also download the wheel from GitHub Releases and install it directly:
 
 ```bash
-python -m pip install github_ai_radar-0.4.0-py3-none-any.whl
+python -m pip install github_ai_radar-0.4.1-py3-none-any.whl
 ```
 
 Initialize local state:
@@ -175,7 +178,7 @@ reports/github-radar/state/YYYY-MM-DD.state.json
 reports/github-radar/raw/github/YYYY-MM-DD.json
 ```
 
-The Markdown report is for reading. The audit JSON is for traceability: queries, checked repositories, skipped candidates, source URLs, scoring notes, growth evidence, risks, and uncertainty.
+The Markdown report is for reading. The audit JSON is for traceability: GitHub queries, checked repositories, scoring notes, growth evidence, artifacts, risks, and uncertainty. External event source URLs will appear after the official-source collector is implemented.
 
 ### 4. Edit Collection Directions
 
@@ -199,11 +202,13 @@ github_terms = [
   "another keyword"
 ]
 source_terms = [
-  "my external source query"
+  "my external source query for a later release"
 ]
 ```
 
 Use **采集方向** when you want to describe what you care about. Use **查询规则** only when you want precise GitHub search syntax such as `stars:>=50`, `created:>=${date_minus_14}`, `pushed:>=${date_minus_30}`, or `topic:ai-agent`.
+
+In the current release, `github_terms` affect the next report immediately. `source_terms` are saved for the planned external event radar and do not change today's report.
 
 ### 5. Configure Your Own LLM API
 
@@ -339,6 +344,8 @@ data/                   Local SQLite database, ignored by git
 reports/                Local generated reports, ignored by git
 ```
 
+Current data boundary: `github_client`, `storage`, `scorer`, `reporter`, `web`, `app_launcher`, `scheduler`, and `doctor` are active. External source/event collection tables and config fields are reserved for v0.5 and should be read as roadmap placeholders in this release.
+
 Core modules:
 
 - `github_client`: GitHub search and read-only repository inspection.
@@ -353,6 +360,7 @@ Core modules:
 
 ## Roadmap
 
+- v0.4.1: clearer no-code UI copy, removal of inactive external-source edit traps, and release documentation alignment.
 - v0.4: direct dashboard settings and native macOS WebKit app window.
 - v0.5: official-source event collection for AI finance/high-tech and AI biopharma.
 - v0.6: richer tracking views, watchlist history, and trend charts.

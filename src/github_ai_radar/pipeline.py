@@ -15,6 +15,7 @@ from github_ai_radar.storage import (
     complete_run,
     compute_growth,
     create_run,
+    fail_running_runs,
     initialize,
     record_review,
     upsert_repository,
@@ -39,6 +40,15 @@ def _write_state(path: Path, state: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def _read_state(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
 
 
 def _normalize_search_repo(repo: dict) -> dict:
@@ -87,7 +97,7 @@ def _merge_metadata(repo: dict, metadata: dict) -> dict:
     return merged
 
 
-def run_once(
+def _run_once_impl(
     root: Path,
     *,
     timezone: str = "Asia/Shanghai",
@@ -252,3 +262,47 @@ def run_once(
         "audit_json": str(audit_path),
         "state": str(state_path),
     }
+
+
+def run_once(
+    root: Path,
+    *,
+    timezone: str = "Asia/Shanghai",
+    max_candidates: int | None = None,
+    deep_review_limit: int | None = None,
+    trigger_type: str = "manual",
+) -> dict:
+    paths = RadarPaths.from_root(root)
+    paths.ensure()
+    try:
+        report_date = datetime.now(ZoneInfo(timezone)).date().isoformat()
+    except Exception:
+        report_date = datetime.utcnow().date().isoformat()
+    state_path = paths.state_dir / f"{report_date}.state.json"
+
+    try:
+        return _run_once_impl(
+            root,
+            timezone=timezone,
+            max_candidates=max_candidates,
+            deep_review_limit=deep_review_limit,
+            trigger_type=trigger_type,
+        )
+    except Exception as exc:
+        state = _read_state(state_path) or {
+            "report_date": report_date,
+            "stages": [],
+            "last_successful_stage": None,
+            "errors": [],
+        }
+        state["status"] = "failed"
+        state.setdefault("errors", []).append(
+            {
+                "stage": state.get("last_successful_stage") or "init",
+                "error": str(exc),
+                "failed_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            }
+        )
+        _write_state(state_path, state)
+        fail_running_runs(paths.database, report_date)
+        raise

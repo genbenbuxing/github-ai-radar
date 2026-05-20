@@ -203,6 +203,20 @@ def complete_run(database: Path, run_id: int, status: str) -> None:
         )
 
 
+def fail_running_runs(database: Path, report_date: str) -> None:
+    if not database.exists():
+        return
+    with connect(database) as conn:
+        conn.execute(
+            """
+            UPDATE runs
+            SET status = ?, finished_at = ?
+            WHERE report_date = ? AND status = ?
+            """,
+            ("failed", _now(), report_date, "running"),
+        )
+
+
 def add_run_artifact(database: Path, run_id: int, artifact_type: str, path: str) -> None:
     with connect(database) as conn:
         conn.execute(
