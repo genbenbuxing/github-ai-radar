@@ -44,7 +44,7 @@ gh auth login
 Install from the release tag with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.3.0"
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.3.1"
 ```
 
 Or install from a local checkout:
@@ -60,7 +60,7 @@ pip install -e .
 You can also download the wheel from GitHub Releases and install it directly:
 
 ```bash
-python -m pip install github_ai_radar-0.3.0-py3-none-any.whl
+python -m pip install github_ai_radar-0.3.1-py3-none-any.whl
 ```
 
 Initialize local state:
@@ -107,6 +107,13 @@ github-ai-radar app install
 ```
 
 Then open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launchpad. The app starts the local dashboard server if it is not already running, then opens the dashboard in your default browser.
+
+The local app is organized for non-coders:
+
+- **操作台**: generate a report now, see the latest task stage, and jump to common actions.
+- **结果**: open generated Markdown reports, audit JSON files, and recent project reviews.
+- **参数**: find collection directions, GitHub queries, scoring rules, and LLM API status.
+- **自动化**: enable or stop the daily schedule, inspect run stages, and open logs.
 
 Check or remove the app launcher:
 
