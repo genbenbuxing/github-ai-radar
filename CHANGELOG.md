@@ -4,6 +4,14 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.4.0] - 2026-05-20
+
+### Added
+
+- Direct settings editing in the dashboard for run parameters, LLM API, topics, GitHub queries, and scoring.
+- Private local `config/secrets.env` support for no-code LLM API key setup.
+- Native macOS WebKit app window instead of opening the dashboard in an external browser when Swift is available.
+
 ## [0.3.2] - 2026-05-20
 
 ### Added

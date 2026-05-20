@@ -101,7 +101,7 @@ def cmd_app_install(args: argparse.Namespace) -> int:
         name=args.name,
     )
     print(f"installed macOS app: {path}")
-    print(f"dashboard URL: http://127.0.0.1:{args.port}/")
+    print(f"local app window will load: http://127.0.0.1:{args.port}/")
     return 0
 
 
@@ -169,19 +169,19 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
     serve_parser.set_defaults(func=cmd_serve)
 
-    app_parser = subparsers.add_parser("app", help="Manage the local macOS app launcher.")
+    app_parser = subparsers.add_parser("app", help="Manage the local macOS app.")
     app_subparsers = app_parser.add_subparsers(dest="app_command", required=True)
 
-    app_install = app_subparsers.add_parser("install", help="Install a macOS .app launcher into ~/Applications.")
-    app_install.add_argument("--port", type=int, default=8765, help="Dashboard port used by the app launcher.")
+    app_install = app_subparsers.add_parser("install", help="Install the macOS .app into ~/Applications.")
+    app_install.add_argument("--port", type=int, default=8765, help="Local dashboard port used by the app.")
     app_install.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
     app_install.set_defaults(func=cmd_app_install)
 
-    app_uninstall = app_subparsers.add_parser("uninstall", help="Remove the macOS .app launcher.")
+    app_uninstall = app_subparsers.add_parser("uninstall", help="Remove the macOS .app.")
     app_uninstall.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
     app_uninstall.set_defaults(func=cmd_app_uninstall)
 
-    app_status = app_subparsers.add_parser("status", help="Print macOS .app launcher status.")
+    app_status = app_subparsers.add_parser("status", help="Print macOS .app status.")
     app_status.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
     app_status.set_defaults(func=cmd_app_status)
 

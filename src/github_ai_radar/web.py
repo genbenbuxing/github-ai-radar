@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
-from github_ai_radar.config import load_config, llm_status
+from github_ai_radar.config import load_config, load_config_file, llm_status, write_config_file, write_secret
 from github_ai_radar.paths import RadarPaths
 from github_ai_radar.pipeline import STAGES, run_once
 from github_ai_radar.scheduler import install_launchd, launchd_status, uninstall_launchd
@@ -175,6 +175,155 @@ def _parse_bounded_int(values: dict[str, list[str]], name: str, default: int, mi
         return default
 
 
+def _parse_nonnegative_int(values: dict[str, list[str]], name: str, default: int) -> int:
+    try:
+        return max(0, int(values.get(name, [str(default)])[0]))
+    except ValueError:
+        return default
+
+
+def _form_value(values: dict[str, list[str]], name: str, default: str = "") -> str:
+    return values.get(name, [default])[0].strip()
+
+
+def _form_bool(values: dict[str, list[str]], name: str) -> bool:
+    return values.get(name, [""])[0] in {"1", "true", "on", "yes"}
+
+
+def _lines_to_list(value: str) -> list[str]:
+    lines: list[str] = []
+    for chunk in value.replace(",", "\n").splitlines():
+        item = chunk.strip()
+        if item:
+            lines.append(item)
+    return lines
+
+
+def _list_to_text(items: object) -> str:
+    if not isinstance(items, list):
+        return ""
+    return "\n".join(str(item) for item in items)
+
+
+def _field(name: str, value: object, *, input_type: str = "text", min_value: int | None = None, max_value: int | None = None) -> str:
+    attrs = []
+    if min_value is not None:
+        attrs.append(f'min="{min_value}"')
+    if max_value is not None:
+        attrs.append(f'max="{max_value}"')
+    attr_text = " ".join(attrs)
+    return f'<input name="{html.escape(name)}" type="{html.escape(input_type)}" value="{html.escape(str(value))}" {attr_text}>'
+
+
+def _textarea(name: str, value: object, rows: int = 3) -> str:
+    return f'<textarea name="{html.escape(name)}" rows="{rows}">{html.escape(str(value))}</textarea>'
+
+
+def _checked(value: object) -> str:
+    return " checked" if bool(value) else ""
+
+
+def _save_radar_settings(paths: RadarPaths, values: dict[str, list[str]]) -> str:
+    payload = load_config_file(paths.root, "radar.toml")
+    radar = payload.setdefault("radar", {})
+    radar["timezone"] = _form_value(values, "timezone", "Asia/Shanghai") or "Asia/Shanghai"
+    radar["report_time"] = _form_value(values, "report_time", "10:00") or "10:00"
+    radar["report_style"] = _form_value(values, "report_style", "standard") or "standard"
+    radar["max_candidates_per_run"] = _parse_int(values, "max_candidates_per_run", 100)
+    radar["deep_review_limit"] = _parse_int(values, "deep_review_limit", 10)
+    radar["read_only"] = _form_bool(values, "read_only")
+    write_config_file(paths.root, "radar.toml", payload)
+    return "运行参数已保存。"
+
+
+def _save_llm_settings(paths: RadarPaths, values: dict[str, list[str]]) -> str:
+    payload = load_config_file(paths.root, "llm.toml")
+    llm = payload.setdefault("llm", {})
+    llm["enabled"] = _form_bool(values, "enabled")
+    llm["provider"] = _form_value(values, "provider", "openai_compatible") or "openai_compatible"
+    llm["base_url"] = _form_value(values, "base_url", "https://api.openai.com/v1") or "https://api.openai.com/v1"
+    llm["model"] = _form_value(values, "model", "gpt-4.1-mini") or "gpt-4.1-mini"
+    llm["api_key_env"] = _form_value(values, "api_key_env", "OPENAI_API_KEY") or "OPENAI_API_KEY"
+    llm["timeout_seconds"] = _parse_int(values, "timeout_seconds", 60)
+    write_config_file(paths.root, "llm.toml", payload)
+    api_key_value = _form_value(values, "api_key_value")
+    if api_key_value:
+        write_secret(paths.root, str(llm["api_key_env"]), api_key_value)
+        return "LLM 设置和本地私有 API Key 已保存。"
+    if _form_bool(values, "clear_api_key"):
+        write_secret(paths.root, str(llm["api_key_env"]), "")
+        return "LLM 设置已保存，并已清除本地私有 API Key。"
+    return "LLM 设置已保存。"
+
+
+def _save_topics(paths: RadarPaths, values: dict[str, list[str]]) -> str:
+    count = _parse_bounded_int(values, "topic_count", 0, 0, 200)
+    topics: list[dict[str, object]] = []
+    for index in range(count):
+        prefix = f"topic_{index}_"
+        name = _form_value(values, prefix + "name")
+        if not name:
+            continue
+        topics.append(
+            {
+                "name": name,
+                "enabled": _form_bool(values, prefix + "enabled"),
+                "description": _form_value(values, prefix + "description"),
+                "github_terms": _lines_to_list(_form_value(values, prefix + "github_terms")),
+                "source_terms": _lines_to_list(_form_value(values, prefix + "source_terms")),
+            }
+        )
+    new_name = _form_value(values, "new_topic_name")
+    if new_name:
+        topics.append(
+            {
+                "name": new_name,
+                "enabled": True,
+                "description": _form_value(values, "new_topic_description"),
+                "github_terms": _lines_to_list(_form_value(values, "new_topic_github_terms")),
+                "source_terms": _lines_to_list(_form_value(values, "new_topic_source_terms")),
+            }
+        )
+    write_config_file(paths.root, "topics.toml", {"topics": topics})
+    return "采集方向已保存。"
+
+
+def _save_queries(paths: RadarPaths, values: dict[str, list[str]]) -> str:
+    payload = load_config_file(paths.root, "queries.toml")
+    github_count = _parse_bounded_int(values, "github_query_count", 0, 0, 200)
+    source_count = _parse_bounded_int(values, "source_query_count", 0, 0, 200)
+    github_queries: list[dict[str, str]] = []
+    source_queries: list[dict[str, str]] = []
+    for index in range(github_count):
+        name = _form_value(values, f"github_query_{index}_name")
+        query = _form_value(values, f"github_query_{index}_query")
+        if name and query:
+            github_queries.append({"name": name, "query": query})
+    for index in range(source_count):
+        name = _form_value(values, f"source_query_{index}_name")
+        query = _form_value(values, f"source_query_{index}_query")
+        if name and query:
+            source_queries.append({"name": name, "query": query})
+    new_name = _form_value(values, "new_github_query_name")
+    new_query = _form_value(values, "new_github_query")
+    if new_name and new_query:
+        github_queries.append({"name": new_name, "query": new_query})
+    payload["github_queries"] = github_queries
+    payload["source_queries"] = source_queries
+    write_config_file(paths.root, "queries.toml", payload)
+    return "查询规则已保存。"
+
+
+def _save_scoring(paths: RadarPaths, values: dict[str, list[str]]) -> str:
+    payload = load_config_file(paths.root, "scoring.toml")
+    for section_name in ("weights", "penalties"):
+        section = payload.setdefault(section_name, {})
+        for key in list(section.keys()):
+            section[key] = _parse_nonnegative_int(values, f"{section_name}_{key}", int(section[key]))
+    write_config_file(paths.root, "scoring.toml", payload)
+    return "评分权重已保存。"
+
+
 def _open_target(paths: RadarPaths, target: str) -> str:
     config_dir = paths.root / "config"
     allowed = {
@@ -308,7 +457,7 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
     .button.danger {{ background: #fee4e2; color: var(--bad); border: 1px solid #fecdca; }}
     .inline-form {{ display: inline; margin: 0; }}
     label {{ display: block; font-weight: 700; margin-bottom: 5px; }}
-    input, select {{
+    input, select, textarea {{
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -317,7 +466,15 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
       color: var(--ink);
       font: inherit;
     }}
+    textarea {{ resize: vertical; min-height: 78px; }}
+    input[type="checkbox"] {{ width: auto; transform: translateY(1px); }}
     .form-grid {{ display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; align-items: end; }}
+    .settings-form {{ display: grid; gap: 12px; }}
+    .settings-form .row {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+    .settings-form .row-3 {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    .editable-list {{ display: grid; gap: 12px; }}
+    .editable-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfcfe; }}
+    .checkbox-line {{ display: flex; align-items: center; gap: 8px; font-weight: 700; }}
     table {{ width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }}
     th, td {{ padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }}
     th {{ font-size: 12px; color: var(--muted); background: #eef2f7; }}
@@ -380,7 +537,7 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
       nav {{ display: flex; gap: 6px; flex-wrap: wrap; }}
       nav a {{ margin-bottom: 0; }}
       main {{ padding: 18px; }}
-      .grid-2, .grid-3, .grid-4, .form-grid {{ grid-template-columns: 1fr; }}
+      .grid-2, .grid-3, .grid-4, .form-grid, .settings-form .row, .settings-form .row-3 {{ grid-template-columns: 1fr; }}
       .stage {{ grid-template-columns: 22px minmax(0, 1fr); }}
       .stage .muted {{ grid-column: 2; }}
     }}
@@ -497,6 +654,157 @@ def _review_rows(paths: RadarPaths) -> str:
     ) or '<tr><td colspan="5" class="muted">还没有项目分析记录。</td></tr>'
 
 
+def _radar_settings_form(config: object) -> str:
+    radar = getattr(config, "radar")
+    return f"""
+<form method="post" action="/actions/settings/radar" class="settings-form">
+  <div class="row row-3">
+    <div><label>报告时区</label>{_field("timezone", radar.get("timezone", "Asia/Shanghai"))}</div>
+    <div><label>报告时间</label>{_field("report_time", radar.get("report_time", "10:00"))}</div>
+    <div><label>报告版本</label>{_field("report_style", radar.get("report_style", "standard"))}</div>
+  </div>
+  <div class="row">
+    <div><label>默认候选项目数</label>{_field("max_candidates_per_run", radar.get("max_candidates_per_run", 100), input_type="number", min_value=1)}</div>
+    <div><label>默认深度阅读数</label>{_field("deep_review_limit", radar.get("deep_review_limit", 10), input_type="number", min_value=1)}</div>
+  </div>
+  <label class="checkbox-line"><input type="checkbox" name="read_only" value="1"{_checked(radar.get("read_only", True))}>只读研究模式</label>
+  <div class="actions"><button class="button" type="submit">保存运行参数</button></div>
+</form>
+"""
+
+
+def _llm_form(llm_status_payload: dict[str, object]) -> str:
+    configured = bool(llm_status_payload.get("configured"))
+    llm_data = {
+        "enabled": llm_status_payload.get("enabled", False),
+        "provider": llm_status_payload.get("provider") or "openai_compatible",
+        "base_url": llm_status_payload.get("base_url") or "https://api.openai.com/v1",
+        "model": llm_status_payload.get("model") or "gpt-4.1-mini",
+        "api_key_env": llm_status_payload.get("api_key_env") or "OPENAI_API_KEY",
+        "timeout_seconds": llm_status_payload.get("timeout_seconds") or 60,
+    }
+    return f"""
+<form method="post" action="/actions/settings/llm" class="settings-form">
+  <label class="checkbox-line"><input type="checkbox" name="enabled" value="1"{_checked(llm_data["enabled"])}>启用 LLM 辅助分析</label>
+  <div class="row">
+    <div><label>Provider</label>{_field("provider", llm_data["provider"])}</div>
+    <div><label>模型</label>{_field("model", llm_data["model"])}</div>
+  </div>
+  <div><label>OpenAI-compatible Base URL</label>{_field("base_url", llm_data["base_url"])}</div>
+  <div class="row">
+    <div><label>API Key 变量名</label>{_field("api_key_env", llm_data["api_key_env"])}</div>
+    <div><label>超时时间秒数</label>{_field("timeout_seconds", llm_data["timeout_seconds"], input_type="number", min_value=1)}</div>
+  </div>
+  <div><label>API Key</label><input name="api_key_value" type="password" placeholder="留空表示不修改已保存的本地私有 key"></div>
+  <label class="checkbox-line"><input type="checkbox" name="clear_api_key" value="1">清除已保存的本地私有 API Key</label>
+  <div class="helper">Key 会保存到 <span class="file-chip">config/secrets.env</span>，该文件已被 git 忽略。配置文件状态：{'已创建' if configured else '未创建'}；Key 状态：{'已检测到' if llm_status_payload.get("api_key_present") else '未检测到'}。</div>
+  <div class="actions"><button class="button" type="submit">保存 LLM 设置</button></div>
+</form>
+"""
+
+
+def _scoring_form(config: object) -> str:
+    rows = []
+    for section_name, title in (("weights", "加分权重"), ("penalties", "降权规则")):
+        section = getattr(config, section_name)
+        controls = "\n".join(
+            f'<div><label>{html.escape(str(key))}</label>{_field(f"{section_name}_{key}", value, input_type="number", min_value=0)}</div>'
+            for key, value in section.items()
+        )
+        rows.append(f'<h3>{title}</h3><div class="row row-3">{controls}</div>')
+    return f"""
+<form method="post" action="/actions/settings/scoring" class="settings-form">
+  {''.join(rows)}
+  <div class="actions"><button class="button" type="submit">保存评分权重</button></div>
+</form>
+"""
+
+
+def _topics_form(config: object) -> str:
+    topic_items = []
+    topics = getattr(config, "topics")
+    for index, item in enumerate(topics):
+        prefix = f"topic_{index}_"
+        topic_items.append(
+            f"""
+<div class="editable-item">
+  <div class="row">
+    <div><label>方向名称</label>{_field(prefix + "name", item.get("name", ""))}</div>
+    <div><label class="checkbox-line"><input type="checkbox" name="{prefix}enabled" value="1"{_checked(item.get("enabled"))}>启用这个方向</label></div>
+  </div>
+  <div><label>说明</label>{_field(prefix + "description", item.get("description", ""))}</div>
+  <div class="row">
+    <div><label>GitHub 关键词，每行一个</label>{_textarea(prefix + "github_terms", _list_to_text(item.get("github_terms")), rows=5)}</div>
+    <div><label>外部来源关键词，每行一个</label>{_textarea(prefix + "source_terms", _list_to_text(item.get("source_terms")), rows=5)}</div>
+  </div>
+</div>
+"""
+        )
+    return f"""
+<form method="post" action="/actions/settings/topics" class="settings-form">
+  <input type="hidden" name="topic_count" value="{len(topics)}">
+  <div class="editable-list">{''.join(topic_items)}</div>
+  <div class="editable-item">
+    <h3>新增方向</h3>
+    <div class="row">
+      <div><label>方向名称</label>{_field("new_topic_name", "")}</div>
+      <div><label>说明</label>{_field("new_topic_description", "")}</div>
+    </div>
+    <div class="row">
+      <div><label>GitHub 关键词，每行一个</label>{_textarea("new_topic_github_terms", "", rows=4)}</div>
+      <div><label>外部来源关键词，每行一个</label>{_textarea("new_topic_source_terms", "", rows=4)}</div>
+    </div>
+  </div>
+  <div class="actions"><button class="button" type="submit">保存采集方向</button></div>
+</form>
+"""
+
+
+def _queries_form(config: object) -> str:
+    github_items = []
+    source_items = []
+    github_queries = getattr(config, "github_queries")
+    source_queries = getattr(config, "source_queries")
+    for index, item in enumerate(github_queries):
+        prefix = f"github_query_{index}_"
+        github_items.append(
+            f"""
+<div class="editable-item">
+  <div><label>名称</label>{_field(prefix + "name", item.get("name", ""))}</div>
+  <div><label>GitHub 查询语句</label>{_textarea(prefix + "query", item.get("query", ""), rows=2)}</div>
+</div>
+"""
+        )
+    for index, item in enumerate(source_queries):
+        prefix = f"source_query_{index}_"
+        source_items.append(
+            f"""
+<div class="editable-item">
+  <div><label>名称</label>{_field(prefix + "name", item.get("name", ""))}</div>
+  <div><label>外部来源查询语句</label>{_textarea(prefix + "query", item.get("query", ""), rows=2)}</div>
+</div>
+"""
+        )
+    return f"""
+<form method="post" action="/actions/settings/queries" class="settings-form">
+  <input type="hidden" name="github_query_count" value="{len(github_queries)}">
+  <input type="hidden" name="source_query_count" value="{len(source_queries)}">
+  <h3>GitHub 查询</h3>
+  <div class="editable-list">{''.join(github_items)}</div>
+  <div class="editable-item">
+    <h3>新增 GitHub 查询</h3>
+    <div class="row">
+      <div><label>名称</label>{_field("new_github_query_name", "")}</div>
+      <div><label>查询语句</label>{_textarea("new_github_query", "", rows=2)}</div>
+    </div>
+  </div>
+  <h3>外部来源查询</h3>
+  <div class="editable-list">{''.join(source_items)}</div>
+  <div class="actions"><button class="button" type="submit">保存查询规则</button></div>
+</form>
+"""
+
+
 def render_dashboard(paths: RadarPaths, notice: str = "") -> bytes:
     counts = table_counts(paths.database) if paths.database.exists() else {}
     reports = _reports(paths)
@@ -542,8 +850,8 @@ def render_dashboard(paths: RadarPaths, notice: str = "") -> bytes:
   </div>
   <div class="panel">
     <h3>参数在哪里改</h3>
-    <p class="muted">采集方向、查询词、评分权重、LLM API 都集中在“参数”页。</p>
-    <div class="actions"><a class="button" href="/settings">查看参数</a>{_open_form("config", "打开参数文件夹")}</div>
+    <p class="muted">采集方向、查询词、评分权重、LLM API 都可以在“参数”页直接保存。</p>
+    <div class="actions"><a class="button" href="/settings">查看参数</a></div>
   </div>
   <div class="panel">
     <h3>任务执行到哪里了</h3>
@@ -596,52 +904,26 @@ def render_results(paths: RadarPaths, notice: str = "") -> bytes:
 def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
     config = load_config(paths.root)
     llm = llm_status(paths.root)
-    topics = "\n".join(
-        "<tr>"
-        f"<td>{html.escape(str(item.get('name', '-')))}</td>"
-        f"<td><span class=\"pill {'ok' if item.get('enabled') else 'warn'}\">{'启用' if item.get('enabled') else '停用'}</span></td>"
-        f"<td>{html.escape(str(item.get('description', '-')))}</td>"
-        f"<td>{html.escape(', '.join(item.get('github_terms') or []))}</td>"
-        "</tr>"
-        for item in config.topics
-    ) or '<tr><td colspan="4" class="muted">还没有采集方向。</td></tr>'
-    query_rows = "\n".join(
-        f"<tr><td>{html.escape(item.get('name', '-'))}</td><td>{html.escape(item.get('query', '-'))}</td></tr>"
-        for item in config.github_queries
-    ) or '<tr><td colspan="2" class="muted">还没有 GitHub 查询。</td></tr>'
-    llm_rows = [
-        ("配置文件", "已创建" if llm["configured"] else "未创建"),
-        ("启用状态", "启用" if llm["enabled"] else "未启用"),
-        ("Provider", llm.get("provider") or "-"),
-        ("Base URL", llm.get("base_url") or "-"),
-        ("Model", llm.get("model") or "-"),
-        ("API Key 环境变量", llm.get("api_key_env") or "-"),
-        ("API Key 是否可用", "可用" if llm["api_key_present"] else "未检测到"),
-    ]
-    llm_table = "\n".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>" for k, v in llm_rows)
     body = f"""
 {notice}
 <h1>参数</h1>
-<p class="lead">这里不是给程序员看的配置清单，而是告诉你“想调整什么，应该去哪里改”。保存参数文件后，回到操作台立即生成一次报告即可生效。</p>
+<p class="lead">这里可以直接修改参数并保存，不需要再打开配置文件手工编辑。保存后回到操作台立即生成一次报告即可生效。</p>
 
 <section class="grid grid-4">
   <div class="panel">
     <h2>1. 改关注方向</h2>
-    <p class="muted">增加行业、关键词或启用自定义方向。</p>
-    <div class="helper"><span class="file-chip">config/topics.toml</span></div>
-    <div class="actions section">{_open_form("topics_config", "打开采集方向")}</div>
+    <p class="muted">在本页“采集方向”中启用、停用、增加行业和关键词。</p>
+    <div class="helper"><span class="file-chip">直接保存到 config/topics.toml</span></div>
   </div>
   <div class="panel">
     <h2>2. 改搜索规则</h2>
-    <p class="muted">调整 stars、created、pushed、topic 等 GitHub 检索条件。</p>
-    <div class="helper"><span class="file-chip">config/queries.toml</span></div>
-    <div class="actions section">{_open_form("queries_config", "打开查询规则")}</div>
+    <p class="muted">在本页“查询规则”中调整 stars、created、pushed、topic 等条件。</p>
+    <div class="helper"><span class="file-chip">直接保存到 config/queries.toml</span></div>
   </div>
   <div class="panel">
     <h2>3. 接入 LLM</h2>
-    <p class="muted">填写 OpenAI-compatible API 地址、模型和环境变量名。</p>
-    <div class="helper"><span class="file-chip">config/llm.toml</span></div>
-    <div class="actions section">{_open_form("llm_config", "打开 LLM 设置")}</div>
+    <p class="muted">在本页“LLM API”中填写地址、模型和 Key。</p>
+    <div class="helper"><span class="file-chip">配置保存到 llm.toml，Key 保存到 secrets.env</span></div>
   </div>
   <div class="panel">
     <h2>4. 运行与收获</h2>
@@ -655,11 +937,11 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
   <table>
     <thead><tr><th>我想做什么</th><th>在哪里改</th><th>怎么改</th><th>之后做什么</th></tr></thead>
     <tbody>
-      <tr><td>添加新的信息方向</td><td><span class="file-chip">topics.toml</span></td><td>复制 custom 区块，设置 enabled = true，改 name、description、github_terms。</td><td>保存后回操作台立即生成报告。</td></tr>
-      <tr><td>让搜索更宽或更窄</td><td><span class="file-chip">queries.toml</span></td><td>调整 stars、created、pushed、topic 等条件；stars 越低越宽，时间窗口越长越宽。</td><td>生成一次报告观察候选数量。</td></tr>
-      <tr><td>控制每天看多少项目</td><td><span class="file-chip">radar.toml</span></td><td>修改 max_candidates_per_run 和 deep_review_limit。</td><td>候选多会更慢，深读多会更详细。</td></tr>
-      <tr><td>调整推荐分数</td><td><span class="file-chip">scoring.toml</span></td><td>修改 weights 和 penalties，提升你更看重的指标。</td><td>新报告会使用新的评分权重。</td></tr>
-      <tr><td>使用自己的 LLM API</td><td><span class="file-chip">llm.toml</span></td><td>enabled = true，填写 base_url、model、api_key_env；真实 key 放在环境变量里。</td><td>重启 App 或每日任务，让新环境变量被读取。</td></tr>
+      <tr><td>添加新的信息方向</td><td>采集方向</td><td>填写新增方向名称、说明和关键词，点击保存。</td><td>保存后回操作台立即生成报告。</td></tr>
+      <tr><td>让搜索更宽或更窄</td><td>查询规则</td><td>调整 stars、created、pushed、topic 等条件；stars 越低越宽，时间窗口越长越宽。</td><td>生成一次报告观察候选数量。</td></tr>
+      <tr><td>控制每天看多少项目</td><td>运行参数</td><td>修改候选项目数和深度阅读数。</td><td>候选多会更慢，深读多会更详细。</td></tr>
+      <tr><td>调整推荐分数</td><td>评分标准</td><td>修改加分权重和降权规则。</td><td>新报告会使用新的评分权重。</td></tr>
+      <tr><td>使用自己的 LLM API</td><td>LLM API</td><td>启用 LLM，填写 base_url、model 和 API Key。</td><td>新任务会读取保存后的设置。</td></tr>
     </tbody>
   </table>
 </section>
@@ -667,13 +949,7 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
 <section class="grid grid-3">
   <div class="panel">
     <h2>运行参数</h2>
-    <table>
-      <tbody>
-        <tr><td>默认候选项目数</td><td>{html.escape(str(config.radar.get("max_candidates_per_run", "-")))}</td></tr>
-        <tr><td>默认深度阅读数</td><td>{html.escape(str(config.radar.get("deep_review_limit", "-")))}</td></tr>
-        <tr><td>报告时区</td><td>{html.escape(str(config.radar.get("timezone", "Asia/Shanghai")))}</td></tr>
-      </tbody>
-    </table>
+    {_radar_settings_form(config)}
     <div class="helper">
       <ol class="steps">
         <li><strong>候选项目数</strong>决定先看多少个 GitHub 候选。</li>
@@ -681,46 +957,36 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
         <li><strong>报告时区</strong>影响报告日期和每日任务的目标时间。</li>
       </ol>
     </div>
-    <div class="actions section">{_open_form("radar_config", "打开运行参数")}</div>
   </div>
   <div class="panel">
     <h2>评分标准</h2>
     <p class="muted">领域相关度、可用性、文档、维护、社区、License、新颖性和 star 增长都在这里调整。</p>
     <div class="helper">想让项目更偏“能马上用”，提高 usability_evidence 和 readme_quality；想追踪爆发项目，提高 star_growth_3d。</div>
-    <div class="actions">{_open_form("scoring_config", "打开评分权重")}</div>
+    {_scoring_form(config)}
   </div>
   <div class="panel">
     <h2>LLM API</h2>
-    <table><tbody>{llm_table}</tbody></table>
+    {_llm_form(llm)}
     <div class="helper">
       <ol class="steps">
-        <li>点击“打开 LLM 设置”，如果文件不存在会自动从示例创建。</li>
-        <li>把 enabled 改为 true，填写 base_url、model 和 api_key_env。</li>
-        <li>不要把真实 API Key 写进文件；把 Key 放到环境变量，例如 OPENAI_API_KEY。</li>
+        <li>API Key 不写进公开配置文件，会保存到本地私有 <span class="file-chip">config/secrets.env</span>。</li>
+        <li>如果你使用 OpenAI 官方 API，base_url 保持默认即可。</li>
+        <li>如果你使用兼容服务，填写服务商提供的 OpenAI-compatible 地址。</li>
       </ol>
     </div>
-    <div class="actions section">{_open_form("llm_config", "打开 LLM 设置")}{_open_form("llm_example", "打开示例")}</div>
   </div>
 </section>
 
 <section class="section panel">
   <h2>采集方向</h2>
   <p class="muted">采集方向是“你关心什么”。这里适合添加新行业、新技术、新公司类型或自定义关键词。</p>
-  <div class="actions" style="margin-bottom: 12px;">{_open_form("topics_config", "打开采集方向")}</div>
-  <table>
-    <thead><tr><th>方向</th><th>状态</th><th>说明</th><th>关键词</th></tr></thead>
-    <tbody>{topics}</tbody>
-  </table>
+  {_topics_form(config)}
 </section>
 
 <section class="section panel">
   <h2>GitHub 查询</h2>
   <p class="muted">GitHub 查询是“怎么找”。如果你只是添加兴趣方向，优先改采集方向；如果你明确知道 GitHub 搜索语法，再改这里。</p>
-  <div class="actions" style="margin-bottom: 12px;">{_open_form("queries_config", "打开查询规则")}{_open_form("config", "打开参数文件夹")}{_open_form("readme", "打开使用说明")}</div>
-  <table>
-    <thead><tr><th>名称</th><th>查询语句</th></tr></thead>
-    <tbody>{query_rows}</tbody>
-  </table>
+  {_queries_form(config)}
 </section>
 """
     return _html_page("GitHub AI Radar Settings", body, active="settings")
@@ -904,6 +1170,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if path == "/actions/schedule/uninstall":
                 uninstall_launchd()
                 self._send_redirect("/automation?" + urlencode({"notice": "每日自动化任务已停止。", "level": "ok"}))
+                return
+            if path == "/actions/settings/radar":
+                message = _save_radar_settings(self.paths, values)
+                self._send_redirect("/settings?" + urlencode({"notice": message, "level": "ok"}))
+                return
+            if path == "/actions/settings/llm":
+                message = _save_llm_settings(self.paths, values)
+                self._send_redirect("/settings?" + urlencode({"notice": message, "level": "ok"}))
+                return
+            if path == "/actions/settings/topics":
+                message = _save_topics(self.paths, values)
+                self._send_redirect("/settings?" + urlencode({"notice": message, "level": "ok"}))
+                return
+            if path == "/actions/settings/queries":
+                message = _save_queries(self.paths, values)
+                self._send_redirect("/settings?" + urlencode({"notice": message, "level": "ok"}))
+                return
+            if path == "/actions/settings/scoring":
+                message = _save_scoring(self.paths, values)
+                self._send_redirect("/settings?" + urlencode({"notice": message, "level": "ok"}))
                 return
             if path == "/actions/open":
                 target = values.get("target", [""])[0]
