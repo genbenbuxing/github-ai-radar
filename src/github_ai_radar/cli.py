@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from github_ai_radar import __version__
+from github_ai_radar.config import ensure_default_config
+from github_ai_radar.doctor import run_doctor
 from github_ai_radar.paths import RadarPaths
 from github_ai_radar.pipeline import run_once
 from github_ai_radar.scheduler import install_launchd, launchd_status, uninstall_launchd
@@ -18,10 +20,15 @@ def _paths(args: argparse.Namespace) -> RadarPaths:
 def cmd_init(args: argparse.Namespace) -> int:
     paths = _paths(args)
     paths.ensure()
+    written = ensure_default_config(paths.root)
     initialize(paths.database)
     print(f"initialized: {paths.root}")
     print(f"database: {paths.database}")
     print(f"reports: {paths.reports_dir}")
+    if written:
+        print("created config files:")
+        for path in written:
+            print(f"- {path}")
     return 0
 
 
@@ -75,6 +82,11 @@ def cmd_schedule_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    print(json.dumps(run_doctor(Path(args.root).expanduser().resolve()), ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="github-ai-radar")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -90,6 +102,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Print local database and artifact status as JSON.")
     status_parser.set_defaults(func=cmd_status)
+
+    doctor_parser = subparsers.add_parser("doctor", help="Diagnose local setup, GitHub auth, database, config, and scheduler.")
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     run_parser = subparsers.add_parser("run", help="Run the radar pipeline.")
     run_parser.add_argument("--once", action="store_true", help="Run one cycle and exit.")

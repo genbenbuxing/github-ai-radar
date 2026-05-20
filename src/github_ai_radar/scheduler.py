@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import plistlib
 import shutil
 import subprocess
@@ -67,6 +68,8 @@ def build_launchd_plist(root: Path, hour: int = 10, minute: int = 0, timezone: s
 
 
 def install_launchd(root: Path, hour: int = 10, minute: int = 0, timezone: str = "Asia/Shanghai") -> Path:
+    if platform.system() != "Darwin":
+        raise RuntimeError("launchd scheduling is only supported on macOS")
     path = launch_agent_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     plist = build_launchd_plist(root, hour=hour, minute=minute, timezone=timezone)
@@ -80,6 +83,8 @@ def install_launchd(root: Path, hour: int = 10, minute: int = 0, timezone: str =
 
 
 def uninstall_launchd() -> Path:
+    if platform.system() != "Darwin":
+        return launch_agent_path()
     path = launch_agent_path()
     subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(path)], check=False, capture_output=True, text=True)
     if path.exists():
@@ -89,6 +94,14 @@ def uninstall_launchd() -> Path:
 
 def launchd_status() -> dict:
     path = launch_agent_path()
+    if platform.system() != "Darwin":
+        return {
+            "label": LABEL,
+            "plist": str(path),
+            "plist_exists": path.exists(),
+            "loaded": False,
+            "details": "launchd is only available on macOS",
+        }
     completed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"], check=False, capture_output=True, text=True)
     return {
         "label": LABEL,

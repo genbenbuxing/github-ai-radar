@@ -4,6 +4,10 @@ The first production database is SQLite.
 
 ## Tables
 
+### schema_migrations
+
+Tracks local SQLite schema versions so future releases can migrate data safely.
+
 ### repositories
 
 Stable repository identity and mostly static metadata.

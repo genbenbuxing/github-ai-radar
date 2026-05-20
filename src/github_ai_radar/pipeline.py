@@ -132,7 +132,19 @@ def run_once(
     raw_results = []
     candidates: dict[str, dict] = {}
     rendered_queries = []
-    for query_def in app_config.github_queries:
+    query_defs = list(app_config.github_queries)
+    for topic in app_config.topics:
+        if not topic.get("enabled"):
+            continue
+        for index, term in enumerate(topic.get("github_terms") or []):
+            query_defs.append(
+                {
+                    "name": f"topic_{topic.get('name', 'custom')}_{index + 1}",
+                    "query": f"{term} pushed:>=${{date_minus_30}} stars:>=10 archived:false fork:false",
+                }
+            )
+
+    for query_def in query_defs:
         query = render_query(query_def["query"], report_day)
         rendered_queries.append({"name": query_def["name"], "query": query})
         result = client.search_repositories(query_def["name"], query, query_limit)
