@@ -4,6 +4,16 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.3.1] - 2026-05-20
+
+### Added
+
+- No-code local console UI with clear entries for report generation, results, settings, and automation.
+- Manual report generation form in the dashboard.
+- Automation page with launchd status, schedule controls, stage timeline, and logs.
+- Settings page that shows collection directions, GitHub queries, scoring, and LLM API status.
+- Local buttons for opening report, config, log, and data folders from the app.
+
 ## [0.3.0] - 2026-05-20
 
 ### Added

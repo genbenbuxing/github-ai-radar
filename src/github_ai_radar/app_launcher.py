@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 APP_NAME = "GitHub AI Radar"
+APP_VERSION = "0.3.1"
 
 
 def _apps_dir() -> Path:
@@ -69,8 +70,8 @@ def _write_info_plist(contents: Path, name: str, executable_name: str) -> None:
         "CFBundleName": name,
         "CFBundleDisplayName": name,
         "CFBundleIdentifier": "com.genbenbuxing.githubairadar",
-        "CFBundleShortVersionString": "0.3.0",
-        "CFBundleVersion": "0.3.0",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
         "CFBundlePackageType": "APPL",
         "CFBundleExecutable": executable_name,
         "LSMinimumSystemVersion": "10.15",
@@ -116,8 +117,8 @@ do shell script launcherPath
     plist["CFBundleName"] = name
     plist["CFBundleDisplayName"] = name
     plist["CFBundleIdentifier"] = "com.genbenbuxing.githubairadar"
-    plist["CFBundleShortVersionString"] = "0.3.0"
-    plist["CFBundleVersion"] = "0.3.0"
+    plist["CFBundleShortVersionString"] = APP_VERSION
+    plist["CFBundleVersion"] = APP_VERSION
     with info_path.open("wb") as handle:
         plistlib.dump(plist, handle, sort_keys=False)
     return app
