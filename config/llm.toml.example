@@ -1,0 +1,18 @@
+[llm]
+enabled = false
+provider = "openai_compatible"
+base_url = "https://api.openai.com/v1"
+model = "gpt-4.1-mini"
+api_key_env = "OPENAI_API_KEY"
+timeout_seconds = 60
+
+# Keep this file as an example. For personal use, copy it to:
+#
+#   config/llm.toml
+#
+# Never commit config/llm.toml with real API keys. The app reads the API key
+# from the environment variable named by api_key_env.
+#
+# Supported shape for now:
+# - OpenAI-compatible chat completions endpoint
+# - optional usage in future report summarization/deeper README review

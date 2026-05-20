@@ -1,0 +1,27 @@
+[weights]
+domain_relevance = 20
+practical_usability_evidence = 15
+readme_documentation_clarity = 12
+maintenance_activity = 12
+community_signal = 10
+three_day_star_growth = 10
+license_friendliness = 8
+novelty = 8
+safety_compliance_control = 5
+
+[penalties]
+archived = 100
+fork_or_mirror = 30
+thin_readme = 15
+unclear_license = 8
+stale_repository = 15
+trading_bot_noise = 20
+marketing_only = 12
+sensitive_permissions = 15
+abnormal_star_fork_ratio = 10
+keyword_stuffing = 10
+
+[growth]
+three_day_growth_min_history_days = 3
+seven_day_growth_min_history_days = 7
+thirty_day_growth_min_history_days = 30
