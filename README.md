@@ -16,14 +16,23 @@ The project is designed to start as a lightweight CLI app and grow into an insta
 
 ## Current Status
 
-This repository is in the system-design and scaffold stage. The first working target is a Python CLI:
+This repository is in the early app stage. The CLI can initialize local storage, collect GitHub repository candidates with `gh`, store snapshots in SQLite, compute available growth metrics, and generate Markdown/audit JSON reports.
 
 ```bash
 pipx install .
 github-ai-radar init
-github-ai-radar run --once
+github-ai-radar run --once --max-candidates 30 --deep-review-limit 8
 github-ai-radar status
 ```
+
+Install a local macOS schedule:
+
+```bash
+github-ai-radar schedule install --timezone Asia/Shanghai --hour 10 --minute 0
+github-ai-radar schedule status
+```
+
+The scheduler uses macOS `launchd` and converts the desired report time to the machine's local timezone at install time. A future service mode will handle timezone/DST more precisely.
 
 ## Architecture
 
