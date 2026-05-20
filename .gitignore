@@ -1,6 +1,7 @@
 # Local app state
 data/
 reports/
+config/llm.toml
 
 # Python
 __pycache__/

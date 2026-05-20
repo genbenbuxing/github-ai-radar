@@ -1,4 +1,4 @@
-from github_ai_radar.storage import initialize, table_counts
+from github_ai_radar.storage import initialize, schema_version, table_counts
 
 
 def test_initialize_creates_tables(tmp_path):
@@ -8,3 +8,5 @@ def test_initialize_creates_tables(tmp_path):
     assert counts["repositories"] == 0
     assert counts["repo_snapshots"] == 0
     assert counts["runs"] == 0
+    version = schema_version(database)
+    assert version["latest_version"] == 1

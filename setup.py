@@ -10,9 +10,6 @@ setup(
     package_dir={"": "src"},
     packages=find_packages("src"),
     python_requires=">=3.9",
-    install_requires=[
-        "tomli>=2.0; python_version < '3.11'",
-    ],
     entry_points={
         "console_scripts": [
             "github-ai-radar=github_ai_radar.cli:main",

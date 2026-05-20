@@ -10,6 +10,12 @@ from typing import Any
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  applied_at TEXT NOT NULL,
+  description TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS repositories (
   id INTEGER PRIMARY KEY,
   full_name TEXT NOT NULL UNIQUE,
@@ -117,6 +123,8 @@ CREATE TABLE IF NOT EXISTS run_artifacts (
 );
 """
 
+SCHEMA_VERSION = 1
+
 
 def connect(database: Path) -> sqlite3.Connection:
     database.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +137,13 @@ def connect(database: Path) -> sqlite3.Connection:
 def initialize(database: Path) -> None:
     with connect(database) as conn:
         conn.executescript(SCHEMA)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO schema_migrations (version, applied_at, description)
+            VALUES (?, ?, ?)
+            """,
+            (SCHEMA_VERSION, _now(), "initial schema"),
+        )
 
 
 def table_counts(database: Path) -> dict[str, int]:
@@ -147,6 +162,20 @@ def table_counts(database: Path) -> dict[str, int]:
         return {
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in tables
+        }
+
+
+def schema_version(database: Path) -> dict[str, Any]:
+    if not database.exists():
+        return {"exists": False, "latest_version": None, "migrations": []}
+    with connect(database) as conn:
+        rows = conn.execute(
+            "SELECT version, applied_at, description FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        return {
+            "exists": True,
+            "latest_version": rows[-1]["version"] if rows else None,
+            "migrations": [dict(row) for row in rows],
         }
 
 

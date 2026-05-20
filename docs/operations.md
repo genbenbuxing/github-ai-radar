@@ -8,7 +8,10 @@ python3 -m venv .venv
 pip install -e .
 github-ai-radar init
 github-ai-radar status
+github-ai-radar doctor
 ```
+
+`init` creates local directories, initializes SQLite, and writes default config files when they do not already exist.
 
 ## Daily Manual Run
 
@@ -36,6 +39,33 @@ github-ai-radar schedule uninstall
 ```
 
 Current limitation: `launchd` stores local wall-clock time, not the target timezone. The installer converts 10:00 GMT+8 to local time at install time. The planned `serve` mode will own timezone-aware scheduling directly.
+
+## Optional LLM API
+
+Copy the example config and keep the real file local:
+
+```bash
+cp config/llm.toml.example config/llm.toml
+```
+
+Set `enabled = true`, choose an OpenAI-compatible `base_url` and `model`, then export the environment variable named by `api_key_env`.
+
+```bash
+export OPENAI_API_KEY="..."
+```
+
+The app should never store raw API keys in git-tracked files.
+
+## Custom Collection Directions
+
+Edit:
+
+```text
+config/topics.toml
+config/queries.toml
+```
+
+`topics.toml` is the friendly place to add directions. Enabled topic `github_terms` contribute simple GitHub searches. `queries.toml` is the precise place for curated GitHub search strings.
 
 ## Artifacts
 

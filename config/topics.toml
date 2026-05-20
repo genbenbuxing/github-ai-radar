@@ -1,0 +1,72 @@
+# Add or edit collection directions here without changing Python code.
+# Keep topics concise; each topic can contribute GitHub and external-source
+# query text. The current pipeline uses GitHub queries from queries.toml, and
+# this file is reserved for the next source-expansion step.
+
+[[topics]]
+name = "ai_applications"
+enabled = true
+description = "AI applications, agents, local operation, memory, vision, RAG, MCP, workflow automation, and developer tooling."
+github_terms = [
+  "agentic ai",
+  "ai agent",
+  "computer use",
+  "browser automation",
+  "vision language model",
+  "memory agent",
+  "mcp",
+  "rag",
+  "workflow automation"
+]
+source_terms = [
+  "agentic AI application",
+  "AI agent platform",
+  "computer use agent",
+  "AI memory infrastructure"
+]
+
+[[topics]]
+name = "finance_high_tech"
+enabled = true
+description = "International finance events tied to AI and high technology."
+github_terms = [
+  "ai fintech",
+  "ai risk management",
+  "ai market research",
+  "financial agent"
+]
+source_terms = [
+  "AI chips earnings",
+  "AI cloud capital expenditure",
+  "AI regulation capital markets",
+  "semiconductor AI finance"
+]
+
+[[topics]]
+name = "biopharma_ai"
+enabled = true
+description = "Biopharma and AI collaboration, drug discovery, clinical development, and biology foundation models."
+github_terms = [
+  "AI drug discovery",
+  "biology foundation model",
+  "protein design",
+  "genomics AI",
+  "clinical trial AI"
+]
+source_terms = [
+  "AI drug discovery partnership",
+  "biopharma AI collaboration",
+  "biology foundation model",
+  "clinical trial AI regulation"
+]
+
+[[topics]]
+name = "custom"
+enabled = false
+description = "User-defined extra direction. Enable and edit as needed."
+github_terms = [
+  "example keyword"
+]
+source_terms = [
+  "example external source query"
+]

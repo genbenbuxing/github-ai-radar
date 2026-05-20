@@ -22,6 +22,8 @@ scorer          Computes relevance, quality, risk, and trend scores.
 reporter        Generates Markdown and audit JSON outputs.
 recovery        Maintains state, partials, logs, and resumable stages.
 scheduler       Runs the app daily without Codex.
+doctor          Diagnoses local GitHub auth, config, database, and scheduler.
+llm             Optional OpenAI-compatible API helper for future deeper analysis.
 app shell       Later desktop/web UI for viewing reports and decisions.
 ```
 
@@ -30,16 +32,17 @@ app shell       Later desktop/web UI for viewing reports and decisions.
 1. Resolve report date in GMT+8.
 2. Load config and query templates.
 3. Resume from `state/YYYY-MM-DD.state.json` if present.
-4. Search GitHub candidates using authenticated `gh` or GitHub API.
-5. Store raw search payloads.
-6. Upsert repository records and daily snapshots.
-7. Compute 3-day, 7-day, and 30-day star growth when local history exists.
-8. Inspect README, license, releases, topics, file tree, and small source snippets.
-9. Discover high-signal finance/high-tech and AI-biopharma events.
-10. Score candidates and apply penalties.
-11. Update watchlist and decisions.
-12. Render Markdown report and audit JSON.
-13. Verify files and mark state as completed.
+4. Expand enabled topics into lightweight GitHub queries.
+5. Search GitHub candidates using authenticated `gh` or GitHub API.
+6. Store raw search payloads.
+7. Upsert repository records and daily snapshots.
+8. Compute 3-day, 7-day, and 30-day star growth when local history exists.
+9. Inspect README, license, releases, topics, file tree, and small source snippets.
+10. Discover high-signal finance/high-tech and AI-biopharma events.
+11. Score candidates and apply penalties.
+12. Update watchlist and decisions.
+13. Render Markdown report and audit JSON.
+14. Verify files and mark state as completed.
 
 ## Recovery Model
 
