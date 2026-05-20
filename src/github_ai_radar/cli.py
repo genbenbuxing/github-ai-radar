@@ -7,10 +7,12 @@ from pathlib import Path
 from github_ai_radar import __version__
 from github_ai_radar.config import ensure_default_config
 from github_ai_radar.doctor import run_doctor
+from github_ai_radar.app_launcher import install_macos_app, macos_app_status, uninstall_macos_app
 from github_ai_radar.paths import RadarPaths
 from github_ai_radar.pipeline import run_once
 from github_ai_radar.scheduler import install_launchd, launchd_status, uninstall_launchd
 from github_ai_radar.storage import initialize, table_counts
+from github_ai_radar.web import serve_dashboard
 
 
 def _paths(args: argparse.Namespace) -> RadarPaths:
@@ -82,6 +84,38 @@ def cmd_schedule_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    serve_dashboard(
+        Path(args.root).expanduser().resolve(),
+        host=args.host,
+        port=args.port,
+        open_browser=args.open,
+    )
+    return 0
+
+
+def cmd_app_install(args: argparse.Namespace) -> int:
+    path = install_macos_app(
+        Path(args.root).expanduser().resolve(),
+        port=args.port,
+        name=args.name,
+    )
+    print(f"installed macOS app: {path}")
+    print(f"dashboard URL: http://127.0.0.1:{args.port}/")
+    return 0
+
+
+def cmd_app_uninstall(args: argparse.Namespace) -> int:
+    path = uninstall_macos_app(name=args.name)
+    print(f"uninstalled macOS app: {path}")
+    return 0
+
+
+def cmd_app_status(args: argparse.Namespace) -> int:
+    print(json.dumps(macos_app_status(name=args.name), ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     print(json.dumps(run_doctor(Path(args.root).expanduser().resolve()), ensure_ascii=False, indent=2))
     return 0
@@ -128,6 +162,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     schedule_status = schedule_subparsers.add_parser("status", help="Print macOS launchd schedule status.")
     schedule_status.set_defaults(func=cmd_schedule_status)
+
+    serve_parser = subparsers.add_parser("serve", help="Start the local HTML dashboard.")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Dashboard bind host.")
+    serve_parser.add_argument("--port", type=int, default=8765, help="Dashboard bind port.")
+    serve_parser.add_argument("--open", action="store_true", help="Open the dashboard in the default browser.")
+    serve_parser.set_defaults(func=cmd_serve)
+
+    app_parser = subparsers.add_parser("app", help="Manage the local macOS app launcher.")
+    app_subparsers = app_parser.add_subparsers(dest="app_command", required=True)
+
+    app_install = app_subparsers.add_parser("install", help="Install a macOS .app launcher into ~/Applications.")
+    app_install.add_argument("--port", type=int, default=8765, help="Dashboard port used by the app launcher.")
+    app_install.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
+    app_install.set_defaults(func=cmd_app_install)
+
+    app_uninstall = app_subparsers.add_parser("uninstall", help="Remove the macOS .app launcher.")
+    app_uninstall.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
+    app_uninstall.set_defaults(func=cmd_app_uninstall)
+
+    app_status = app_subparsers.add_parser("status", help="Print macOS .app launcher status.")
+    app_status.add_argument("--name", default="GitHub AI Radar", help="Application display name.")
+    app_status.set_defaults(func=cmd_app_status)
 
     return parser
 

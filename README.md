@@ -14,6 +14,8 @@ The app is intentionally local-first. Your database, reports, watchlist, and API
 - Computes 3-day, 7-day, and 30-day star growth from local history.
 - Scores projects using relevance, usability evidence, README quality, maintenance, community signal, license, novelty, growth, and safety.
 - Generates a readable daily Markdown report and a machine-readable audit JSON file.
+- Serves a local HTML dashboard for browsing reports, audit files, and recent repository reviews.
+- Installs a macOS `.app` launcher so the dashboard can be opened from Finder, Spotlight, or Launchpad.
 - Installs a macOS `launchd` schedule so daily runs can happen without Codex.
 - Supports optional local LLM configuration for future deeper analysis through OpenAI-compatible APIs.
 
@@ -42,7 +44,7 @@ gh auth login
 Install from the release tag with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.2.0"
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.3.0"
 ```
 
 Or install from a local checkout:
@@ -58,7 +60,7 @@ pip install -e .
 You can also download the wheel from GitHub Releases and install it directly:
 
 ```bash
-python -m pip install github_ai_radar-0.2.0-py3-none-any.whl
+python -m pip install github_ai_radar-0.3.0-py3-none-any.whl
 ```
 
 Initialize local state:
@@ -82,6 +84,35 @@ reports/github-radar/YYYY-MM-DD.md
 reports/github-radar/YYYY-MM-DD.audit.json
 reports/github-radar/state/YYYY-MM-DD.state.json
 reports/github-radar/raw/github/YYYY-MM-DD.json
+```
+
+## Local Dashboard And App
+
+Open the dashboard directly from the command line:
+
+```bash
+github-ai-radar serve --open
+```
+
+The dashboard runs locally at:
+
+```text
+http://127.0.0.1:8765/
+```
+
+Install a macOS app launcher:
+
+```bash
+github-ai-radar app install
+```
+
+Then open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launchpad. The app starts the local dashboard server if it is not already running, then opens the dashboard in your default browser.
+
+Check or remove the app launcher:
+
+```bash
+github-ai-radar app status
+github-ai-radar app uninstall
 ```
 
 ## Daily Schedule
@@ -155,15 +186,17 @@ Core modules:
 - `storage`: SQLite schema, snapshots, reviews, events, watchlist, run records.
 - `scorer`: Conservative scoring and trend calculation.
 - `reporter`: Markdown and audit JSON rendering.
+- `web`: local HTML dashboard and status API.
+- `app_launcher`: macOS `.app` launcher generation.
 - `scheduler`: macOS launchd integration.
 - `doctor`: local setup diagnostics.
 - `llm`: optional OpenAI-compatible chat completion helper.
 
 ## Roadmap
 
-- v0.3: stronger recovery, run lock, retries, `run --resume`, richer watchlist.
+- v0.3: local dashboard and macOS app launcher.
 - v0.4: official-source event collection for AI finance/high-tech and AI biopharma.
-- v0.5: local report index and HTML report browsing.
+- v0.5: richer tracking views, watchlist history, and trend charts.
 - v0.6: package release automation and PyPI distribution.
 - v1.0: stable local app with scheduler, reports, audit trail, and optional LLM-assisted analysis.
 
