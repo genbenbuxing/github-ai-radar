@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from github_ai_radar import __version__
 from github_ai_radar.paths import RadarPaths
+from github_ai_radar.pipeline import run_once
+from github_ai_radar.scheduler import install_launchd, launchd_status, uninstall_launchd
 from github_ai_radar.storage import initialize, table_counts
 
 
@@ -41,23 +41,37 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    paths = _paths(args)
-    paths.ensure()
-    initialize(paths.database)
-    tz = ZoneInfo(args.timezone)
-    report_date = datetime.now(tz).strftime("%Y-%m-%d")
-    state_path = paths.state_dir / f"{report_date}.state.json"
-    state = {
-        "report_date": report_date,
-        "status": "planned",
-        "message": "Collection/review pipeline is not implemented yet. This scaffold verifies installable app state, storage, and recovery paths.",
-        "next_stage": "implement github_client and reporter",
-        "updated_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-    }
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"state written: {state_path}")
-    if args.once:
-        print("run --once completed scaffold check")
+    result = run_once(
+        Path(args.root).expanduser().resolve(),
+        timezone=args.timezone,
+        max_candidates=args.max_candidates,
+        deep_review_limit=args.deep_review_limit,
+        trigger_type=args.trigger_type,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_schedule_install(args: argparse.Namespace) -> int:
+    path = install_launchd(
+        Path(args.root).expanduser().resolve(),
+        hour=args.hour,
+        minute=args.minute,
+        timezone=args.timezone,
+    )
+    print(f"installed launchd agent: {path}")
+    print(f"target report time: {args.hour:02d}:{args.minute:02d} {args.timezone}")
+    return 0
+
+
+def cmd_schedule_uninstall(args: argparse.Namespace) -> int:
+    path = uninstall_launchd()
+    print(f"uninstalled launchd agent: {path}")
+    return 0
+
+
+def cmd_schedule_status(args: argparse.Namespace) -> int:
+    print(json.dumps(launchd_status(), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -80,7 +94,25 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run the radar pipeline.")
     run_parser.add_argument("--once", action="store_true", help="Run one cycle and exit.")
     run_parser.add_argument("--timezone", default="Asia/Shanghai", help="Report timezone.")
+    run_parser.add_argument("--max-candidates", type=int, help="Maximum unique GitHub candidates to inspect.")
+    run_parser.add_argument("--deep-review-limit", type=int, help="Maximum repositories to fetch README/metadata for.")
+    run_parser.add_argument("--trigger-type", default="manual", choices=["manual", "scheduled", "recovery"], help="Run trigger label.")
     run_parser.set_defaults(func=cmd_run)
+
+    schedule_parser = subparsers.add_parser("schedule", help="Manage native local scheduler integration.")
+    schedule_subparsers = schedule_parser.add_subparsers(dest="schedule_command", required=True)
+
+    schedule_install = schedule_subparsers.add_parser("install", help="Install macOS launchd daily schedule.")
+    schedule_install.add_argument("--timezone", default="Asia/Shanghai", help="Desired report timezone.")
+    schedule_install.add_argument("--hour", type=int, default=10, help="Desired report hour in report timezone.")
+    schedule_install.add_argument("--minute", type=int, default=0, help="Desired report minute in report timezone.")
+    schedule_install.set_defaults(func=cmd_schedule_install)
+
+    schedule_uninstall = schedule_subparsers.add_parser("uninstall", help="Uninstall macOS launchd schedule.")
+    schedule_uninstall.set_defaults(func=cmd_schedule_uninstall)
+
+    schedule_status = schedule_subparsers.add_parser("status", help="Print macOS launchd schedule status.")
+    schedule_status.set_defaults(func=cmd_schedule_status)
 
     return parser
 

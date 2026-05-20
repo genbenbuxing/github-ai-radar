@@ -20,6 +20,14 @@ github-ai-radar status
 
 The CLI owns local directories, SQLite, reports, and recovery state.
 
+Implemented in v0.2:
+
+- GitHub candidate search through authenticated `gh`
+- SQLite repository and snapshot storage
+- 3-day, 7-day, and 30-day growth calculation from local history
+- Markdown and audit JSON report generation
+- macOS `launchd` install/status/uninstall commands
+
 ## Stage 2: Native Scheduler Integration
 
 The app should generate and install native schedules:

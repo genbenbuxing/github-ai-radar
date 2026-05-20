@@ -13,7 +13,7 @@ github-ai-radar status
 ## Daily Manual Run
 
 ```bash
-github-ai-radar run --once --root .
+github-ai-radar run --once --root . --max-candidates 30 --deep-review-limit 8
 ```
 
 ## Scheduling Target
@@ -21,6 +21,21 @@ github-ai-radar run --once --root .
 The desired report time is 10:00 GMT+8.
 
 For a machine using America/Los_Angeles time during daylight saving time, this corresponds to 19:00 on the previous calendar day. Native schedulers should store the intended timezone explicitly where possible.
+
+Install the macOS launchd schedule:
+
+```bash
+github-ai-radar --root /path/to/github-ai-radar schedule install --timezone Asia/Shanghai --hour 10 --minute 0
+github-ai-radar schedule status
+```
+
+Uninstall:
+
+```bash
+github-ai-radar schedule uninstall
+```
+
+Current limitation: `launchd` stores local wall-clock time, not the target timezone. The installer converts 10:00 GMT+8 to local time at install time. The planned `serve` mode will own timezone-aware scheduling directly.
 
 ## Artifacts
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 SCHEMA = """
@@ -145,3 +148,182 @@ def table_counts(database: Path) -> dict[str, int]:
             table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in tables
         }
+
+
+def _now() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def create_run(database: Path, report_date: str, trigger_type: str, state_path: str) -> int:
+    with connect(database) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO runs (report_date, started_at, status, trigger_type, state_path)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (report_date, _now(), "running", trigger_type, state_path),
+        )
+        return int(cursor.lastrowid)
+
+
+def complete_run(database: Path, run_id: int, status: str) -> None:
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE runs SET status = ?, finished_at = ? WHERE id = ?",
+            (status, _now(), run_id),
+        )
+
+
+def add_run_artifact(database: Path, run_id: int, artifact_type: str, path: str) -> None:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO run_artifacts (run_id, artifact_type, path, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (run_id, artifact_type, path, _now()),
+        )
+
+
+def upsert_repository(database: Path, repo: dict[str, Any], seen_date: str) -> int:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO repositories (
+              full_name, url, description, primary_language, license_key,
+              created_at, is_archived, is_fork, first_seen_at, last_seen_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(full_name) DO UPDATE SET
+              url = excluded.url,
+              description = excluded.description,
+              primary_language = excluded.primary_language,
+              license_key = excluded.license_key,
+              created_at = COALESCE(excluded.created_at, repositories.created_at),
+              is_archived = excluded.is_archived,
+              is_fork = excluded.is_fork,
+              last_seen_at = excluded.last_seen_at
+            """,
+            (
+                repo["full_name"],
+                repo["url"],
+                repo.get("description"),
+                repo.get("language"),
+                repo.get("license_key"),
+                repo.get("created_at"),
+                1 if repo.get("is_archived") else 0,
+                1 if repo.get("is_fork") else 0,
+                seen_date,
+                seen_date,
+            ),
+        )
+        row = conn.execute("SELECT id FROM repositories WHERE full_name = ?", (repo["full_name"],)).fetchone()
+        return int(row["id"])
+
+
+def upsert_snapshot(
+    database: Path,
+    repository_id: int,
+    snapshot_date: str,
+    repo: dict[str, Any],
+    *,
+    entered_candidate_pool: bool,
+) -> None:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO repo_snapshots (
+              repository_id, snapshot_date, stars, forks, open_issues, pushed_at,
+              updated_at, topics_json, entered_candidate_pool
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(repository_id, snapshot_date) DO UPDATE SET
+              stars = excluded.stars,
+              forks = excluded.forks,
+              open_issues = excluded.open_issues,
+              pushed_at = excluded.pushed_at,
+              updated_at = excluded.updated_at,
+              topics_json = excluded.topics_json,
+              entered_candidate_pool = max(repo_snapshots.entered_candidate_pool, excluded.entered_candidate_pool)
+            """,
+            (
+                repository_id,
+                snapshot_date,
+                repo.get("stars"),
+                repo.get("forks"),
+                repo.get("open_issues"),
+                repo.get("pushed_at"),
+                repo.get("updated_at"),
+                json.dumps(repo.get("topics") or [], ensure_ascii=False),
+                1 if entered_candidate_pool else 0,
+            ),
+        )
+
+
+def _snapshot_on_or_before(conn: sqlite3.Connection, repository_id: int, snapshot_date: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM repo_snapshots
+        WHERE repository_id = ? AND snapshot_date <= ?
+        ORDER BY snapshot_date DESC
+        LIMIT 1
+        """,
+        (repository_id, snapshot_date),
+    ).fetchone()
+
+
+def compute_growth(database: Path, repository_id: int, report_date: str) -> dict[str, dict[str, Any]]:
+    from datetime import date, timedelta
+
+    current_date = date.fromisoformat(report_date)
+    windows = {"3d": 3, "7d": 7, "30d": 30}
+    with connect(database) as conn:
+        current = conn.execute(
+            """
+            SELECT * FROM repo_snapshots
+            WHERE repository_id = ? AND snapshot_date = ?
+            """,
+            (repository_id, report_date),
+        ).fetchone()
+        if not current or current["stars"] is None:
+            return {key: {"status": "insufficient_history"} for key in windows}
+        result: dict[str, dict[str, Any]] = {}
+        for key, days in windows.items():
+            target_date = (current_date - timedelta(days=days)).isoformat()
+            previous = _snapshot_on_or_before(conn, repository_id, target_date)
+            if not previous or previous["stars"] is None:
+                result[key] = {"status": "insufficient_history"}
+                continue
+            delta = int(current["stars"]) - int(previous["stars"])
+            result[key] = {
+                "status": "ok",
+                "current_stars": int(current["stars"]),
+                "previous_stars": int(previous["stars"]),
+                "previous_snapshot_date": previous["snapshot_date"],
+                "delta": delta,
+            }
+        return result
+
+
+def record_review(database: Path, repository_id: int, run_id: int, score: Any) -> None:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO repo_reviews (
+              repository_id, run_id, reviewed_at, score, recommendation,
+              readme_quality, usability_notes, risk_notes, scoring_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                repository_id,
+                run_id,
+                _now(),
+                score.score,
+                score.recommendation,
+                score.readme_quality,
+                score.usability_notes,
+                score.risk_notes,
+                json.dumps(score.scoring, ensure_ascii=False),
+            ),
+        )
