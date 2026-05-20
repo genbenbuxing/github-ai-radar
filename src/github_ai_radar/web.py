@@ -189,6 +189,7 @@ def _open_target(paths: RadarPaths, target: str) -> str:
         "scoring_config": config_dir / "scoring.toml",
         "llm_config": config_dir / "llm.toml",
         "llm_example": config_dir / "llm.toml.example",
+        "readme": paths.root / "README.md",
     }
     path = allowed.get(target)
     if path is None:
@@ -343,6 +344,27 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
     .notice {{ padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--line); background: white; }}
     .notice.ok {{ border-color: #b7ebcc; background: #ecfdf3; color: var(--good); }}
     .notice.bad {{ border-color: #fecdca; background: #fff1f0; color: var(--bad); }}
+    .helper {{
+      background: #f8fbff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 10px;
+    }}
+    .steps {{
+      margin: 0;
+      padding-left: 20px;
+    }}
+    .steps li {{ margin: 6px 0; }}
+    .file-chip {{
+      display: inline-block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 6px;
+    }}
     pre {{
       white-space: pre-wrap;
       word-break: break-word;
@@ -578,10 +600,11 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
         "<tr>"
         f"<td>{html.escape(str(item.get('name', '-')))}</td>"
         f"<td><span class=\"pill {'ok' if item.get('enabled') else 'warn'}\">{'启用' if item.get('enabled') else '停用'}</span></td>"
+        f"<td>{html.escape(str(item.get('description', '-')))}</td>"
         f"<td>{html.escape(', '.join(item.get('github_terms') or []))}</td>"
         "</tr>"
         for item in config.topics
-    ) or '<tr><td colspan="3" class="muted">还没有采集方向。</td></tr>'
+    ) or '<tr><td colspan="4" class="muted">还没有采集方向。</td></tr>'
     query_rows = "\n".join(
         f"<tr><td>{html.escape(item.get('name', '-'))}</td><td>{html.escape(item.get('query', '-'))}</td></tr>"
         for item in config.github_queries
@@ -599,7 +622,47 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
     body = f"""
 {notice}
 <h1>参数</h1>
-<p class="lead">所有参数文件都在本地 config 文件夹。点击按钮可以直接打开对应文件或文件夹。</p>
+<p class="lead">这里不是给程序员看的配置清单，而是告诉你“想调整什么，应该去哪里改”。保存参数文件后，回到操作台立即生成一次报告即可生效。</p>
+
+<section class="grid grid-4">
+  <div class="panel">
+    <h2>1. 改关注方向</h2>
+    <p class="muted">增加行业、关键词或启用自定义方向。</p>
+    <div class="helper"><span class="file-chip">config/topics.toml</span></div>
+    <div class="actions section">{_open_form("topics_config", "打开采集方向")}</div>
+  </div>
+  <div class="panel">
+    <h2>2. 改搜索规则</h2>
+    <p class="muted">调整 stars、created、pushed、topic 等 GitHub 检索条件。</p>
+    <div class="helper"><span class="file-chip">config/queries.toml</span></div>
+    <div class="actions section">{_open_form("queries_config", "打开查询规则")}</div>
+  </div>
+  <div class="panel">
+    <h2>3. 接入 LLM</h2>
+    <p class="muted">填写 OpenAI-compatible API 地址、模型和环境变量名。</p>
+    <div class="helper"><span class="file-chip">config/llm.toml</span></div>
+    <div class="actions section">{_open_form("llm_config", "打开 LLM 设置")}</div>
+  </div>
+  <div class="panel">
+    <h2>4. 运行与收获</h2>
+    <p class="muted">在操作台生成报告，在结果页查看 Markdown 和审计 JSON。</p>
+    <div class="actions section"><a class="button" href="/">去操作台</a><a class="button secondary" href="/results">查看结果</a></div>
+  </div>
+</section>
+
+<section class="section panel">
+  <h2>常见目标对照表</h2>
+  <table>
+    <thead><tr><th>我想做什么</th><th>在哪里改</th><th>怎么改</th><th>之后做什么</th></tr></thead>
+    <tbody>
+      <tr><td>添加新的信息方向</td><td><span class="file-chip">topics.toml</span></td><td>复制 custom 区块，设置 enabled = true，改 name、description、github_terms。</td><td>保存后回操作台立即生成报告。</td></tr>
+      <tr><td>让搜索更宽或更窄</td><td><span class="file-chip">queries.toml</span></td><td>调整 stars、created、pushed、topic 等条件；stars 越低越宽，时间窗口越长越宽。</td><td>生成一次报告观察候选数量。</td></tr>
+      <tr><td>控制每天看多少项目</td><td><span class="file-chip">radar.toml</span></td><td>修改 max_candidates_per_run 和 deep_review_limit。</td><td>候选多会更慢，深读多会更详细。</td></tr>
+      <tr><td>调整推荐分数</td><td><span class="file-chip">scoring.toml</span></td><td>修改 weights 和 penalties，提升你更看重的指标。</td><td>新报告会使用新的评分权重。</td></tr>
+      <tr><td>使用自己的 LLM API</td><td><span class="file-chip">llm.toml</span></td><td>enabled = true，填写 base_url、model、api_key_env；真实 key 放在环境变量里。</td><td>重启 App 或每日任务，让新环境变量被读取。</td></tr>
+    </tbody>
+  </table>
+</section>
 
 <section class="grid grid-3">
   <div class="panel">
@@ -611,32 +674,49 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
         <tr><td>报告时区</td><td>{html.escape(str(config.radar.get("timezone", "Asia/Shanghai")))}</td></tr>
       </tbody>
     </table>
+    <div class="helper">
+      <ol class="steps">
+        <li><strong>候选项目数</strong>决定先看多少个 GitHub 候选。</li>
+        <li><strong>深度阅读数</strong>决定读取多少个 README 并打分。</li>
+        <li><strong>报告时区</strong>影响报告日期和每日任务的目标时间。</li>
+      </ol>
+    </div>
     <div class="actions section">{_open_form("radar_config", "打开运行参数")}</div>
   </div>
   <div class="panel">
     <h2>评分标准</h2>
     <p class="muted">领域相关度、可用性、文档、维护、社区、License、新颖性和 star 增长都在这里调整。</p>
+    <div class="helper">想让项目更偏“能马上用”，提高 usability_evidence 和 readme_quality；想追踪爆发项目，提高 star_growth_3d。</div>
     <div class="actions">{_open_form("scoring_config", "打开评分权重")}</div>
   </div>
   <div class="panel">
     <h2>LLM API</h2>
     <table><tbody>{llm_table}</tbody></table>
+    <div class="helper">
+      <ol class="steps">
+        <li>点击“打开 LLM 设置”，如果文件不存在会自动从示例创建。</li>
+        <li>把 enabled 改为 true，填写 base_url、model 和 api_key_env。</li>
+        <li>不要把真实 API Key 写进文件；把 Key 放到环境变量，例如 OPENAI_API_KEY。</li>
+      </ol>
+    </div>
     <div class="actions section">{_open_form("llm_config", "打开 LLM 设置")}{_open_form("llm_example", "打开示例")}</div>
   </div>
 </section>
 
 <section class="section panel">
   <h2>采集方向</h2>
+  <p class="muted">采集方向是“你关心什么”。这里适合添加新行业、新技术、新公司类型或自定义关键词。</p>
   <div class="actions" style="margin-bottom: 12px;">{_open_form("topics_config", "打开采集方向")}</div>
   <table>
-    <thead><tr><th>方向</th><th>状态</th><th>关键词</th></tr></thead>
+    <thead><tr><th>方向</th><th>状态</th><th>说明</th><th>关键词</th></tr></thead>
     <tbody>{topics}</tbody>
   </table>
 </section>
 
 <section class="section panel">
   <h2>GitHub 查询</h2>
-  <div class="actions" style="margin-bottom: 12px;">{_open_form("queries_config", "打开查询规则")}{_open_form("config", "打开参数文件夹")}</div>
+  <p class="muted">GitHub 查询是“怎么找”。如果你只是添加兴趣方向，优先改采集方向；如果你明确知道 GitHub 搜索语法，再改这里。</p>
+  <div class="actions" style="margin-bottom: 12px;">{_open_form("queries_config", "打开查询规则")}{_open_form("config", "打开参数文件夹")}{_open_form("readme", "打开使用说明")}</div>
   <table>
     <thead><tr><th>名称</th><th>查询语句</th></tr></thead>
     <tbody>{query_rows}</tbody>

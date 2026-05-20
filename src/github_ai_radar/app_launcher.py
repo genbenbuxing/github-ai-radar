@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 APP_NAME = "GitHub AI Radar"
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.3.2"
 
 
 def _apps_dir() -> Path:
