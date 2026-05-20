@@ -1,0 +1,66 @@
+[radar]
+timezone = "Asia/Shanghai"
+report_time = "10:00"
+report_style = "standard"
+max_candidates_per_run = 100
+deep_review_limit = 10
+read_only = true
+
+[paths]
+data_dir = "data"
+reports_dir = "reports/github-radar"
+database = "data/radar.sqlite"
+
+[domains.ai_applications]
+enabled = true
+keywords = [
+  "ai agent",
+  "agentic ai",
+  "computer use",
+  "browser automation",
+  "image recognition",
+  "vision language model",
+  "ocr agent",
+  "memory agent",
+  "rag",
+  "mcp",
+  "workflow automation",
+  "developer tools"
+]
+
+[domains.finance_high_tech]
+enabled = true
+keywords = [
+  "AI chips",
+  "AI cloud",
+  "agentic AI enterprise",
+  "AI capital expenditure",
+  "semiconductor AI",
+  "AI regulation finance",
+  "AI fintech"
+]
+
+[domains.biopharma_ai]
+enabled = true
+keywords = [
+  "AI drug discovery",
+  "biology foundation model",
+  "protein design",
+  "genomics AI",
+  "clinical trial AI",
+  "pharma AI collaboration",
+  "BioNeMo",
+  "AI biopharma"
+]
+
+[filters]
+exclude_archived = true
+exclude_forks = true
+minimum_stars_for_mature_search = 50
+new_project_window_days = 14
+active_pushed_window_days = 30
+
+[watchlist]
+deep_read_interval_days = 1
+watch_interval_days = 3
+trial_later_interval_days = 7

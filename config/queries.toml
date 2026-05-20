@@ -1,0 +1,35 @@
+[[github_queries]]
+name = "new_agentic_ai"
+query = "agentic ai created:>=${date_minus_14} pushed:>=${date_minus_7} stars:>=5 archived:false fork:false"
+
+[[github_queries]]
+name = "ai_agent_topic"
+query = "topic:ai-agent pushed:>=${date_minus_30} stars:>=100 archived:false fork:false"
+
+[[github_queries]]
+name = "mcp_agents"
+query = "mcp agent pushed:>=${date_minus_30} stars:>=50 archived:false fork:false"
+
+[[github_queries]]
+name = "computer_use"
+query = "computer use ai agent pushed:>=${date_minus_30} stars:>=10 archived:false fork:false"
+
+[[github_queries]]
+name = "vision_agents"
+query = "vision language model ocr agent pushed:>=${date_minus_30} stars:>=20 archived:false fork:false"
+
+[[github_queries]]
+name = "memory_agents"
+query = "memory agent rag pushed:>=${date_minus_30} stars:>=50 archived:false fork:false"
+
+[[github_queries]]
+name = "ai_drug_discovery"
+query = "AI drug discovery pushed:>=${date_minus_120} stars:>=50 archived:false fork:false"
+
+[[source_queries]]
+name = "finance_high_tech"
+query = "AI high technology finance chips cloud earnings regulation latest official source"
+
+[[source_queries]]
+name = "biopharma_ai"
+query = "AI drug discovery biopharma collaboration clinical trials foundation model official source"
