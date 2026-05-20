@@ -27,7 +27,7 @@ Phase 1 is read-only:
 - No dependency installation from discovered projects.
 - No third-party project execution.
 - No browser cookies, SSH keys, or personal files are exposed.
-- API keys are read from environment variables, not committed config files.
+- API keys are read from environment variables or local `config/secrets.env`, not committed config files.
 
 ## Quickstart
 
@@ -44,7 +44,7 @@ gh auth login
 Install from the release tag with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.3.2"
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.4.0"
 ```
 
 Or install from a local checkout:
@@ -60,7 +60,7 @@ pip install -e .
 You can also download the wheel from GitHub Releases and install it directly:
 
 ```bash
-python -m pip install github_ai_radar-0.3.2-py3-none-any.whl
+python -m pip install github_ai_radar-0.4.0-py3-none-any.whl
 ```
 
 Initialize local state:
@@ -100,22 +100,22 @@ The dashboard runs locally at:
 http://127.0.0.1:8765/
 ```
 
-Install a macOS app launcher:
+Install the macOS app:
 
 ```bash
 github-ai-radar app install
 ```
 
-Then open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launchpad. The app starts the local dashboard server if it is not already running, then opens the dashboard in your default browser.
+Then open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launchpad. On macOS systems with Swift available at install time, this creates a native WebKit app window. The dashboard URL still exists locally for automation and debugging.
 
 The local app is organized for non-coders:
 
 - **操作台**: generate a report now, see the latest task stage, and jump to common actions.
 - **结果**: open generated Markdown reports, audit JSON files, and recent project reviews.
-- **参数**: find collection directions, GitHub queries, scoring rules, and LLM API status.
+- **参数**: edit collection directions, GitHub queries, scoring rules, run settings, and LLM API directly in the app.
 - **自动化**: enable or stop the daily schedule, inspect run stages, and open logs.
 
-Check or remove the app launcher:
+Check or remove the app:
 
 ```bash
 github-ai-radar app status
@@ -128,7 +128,7 @@ github-ai-radar app uninstall
 
 After installation, open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launchpad.
 
-The app opens a local browser page at:
+The app opens its own local window. The same UI is also available at:
 
 ```text
 http://127.0.0.1:8765/
@@ -138,7 +138,7 @@ The app has four main pages:
 
 - **操作台**: run a report now and see the latest run stage.
 - **结果**: open generated reports, audit JSON files, and recent project reviews.
-- **参数**: find and edit collection directions, GitHub queries, scoring, and LLM settings.
+- **参数**: edit collection directions, GitHub queries, scoring, run settings, and LLM settings directly in the app.
 - **自动化**: enable or stop the daily schedule, inspect stages, and open logs.
 
 ### 2. Generate A Report Now
@@ -183,8 +183,8 @@ In the app:
 
 1. Open **参数**.
 2. Use the **设置向导** and **常见目标对照表**.
-3. Click **打开采集方向** to edit `config/topics.toml`.
-4. Save the file.
+3. Edit the **采集方向** form directly in the page.
+4. Click **保存采集方向**.
 5. Return to **操作台** and generate a report to apply the new settings.
 
 Typical edit:
@@ -203,7 +203,7 @@ source_terms = [
 ]
 ```
 
-Use `topics.toml` when you want to describe what you care about. Use `queries.toml` only when you want precise GitHub search syntax such as `stars:>=50`, `created:>=${date_minus_14}`, `pushed:>=${date_minus_30}`, or `topic:ai-agent`.
+Use **采集方向** when you want to describe what you care about. Use **查询规则** only when you want precise GitHub search syntax such as `stars:>=50`, `created:>=${date_minus_14}`, `pushed:>=${date_minus_30}`, or `topic:ai-agent`.
 
 ### 5. Configure Your Own LLM API
 
@@ -213,8 +213,10 @@ In the app:
 
 1. Open **参数**.
 2. Find **LLM API**.
-3. Click **打开 LLM 设置**. If `config/llm.toml` does not exist, the app creates it from `config/llm.toml.example`.
-4. Edit the file:
+3. Enable LLM, then fill in Provider, Base URL, model, timeout, and API Key.
+4. Click **保存 LLM 设置**.
+
+The app saves public configuration to `config/llm.toml`:
 
 ```toml
 [llm]
@@ -226,7 +228,7 @@ api_key_env = "OPENAI_API_KEY"
 timeout_seconds = 60
 ```
 
-5. Put the real API key in the environment variable named by `api_key_env`.
+The API Key itself is saved to local private `config/secrets.env`, which is ignored by git. You can also leave the API Key field blank and provide the key through the environment variable named by `api_key_env`.
 
 For a temporary terminal session:
 
@@ -235,9 +237,9 @@ export OPENAI_API_KEY="..."
 github-ai-radar serve --open
 ```
 
-For scheduled runs on macOS, make sure the environment variable is available to the process that `launchd` starts. A simple local approach is to add the key to the environment before installing or restarting the schedule, or to use a user-level environment manager. Do not put raw API keys into `config/llm.toml`.
+For scheduled runs on macOS, the app can read `config/secrets.env`, so no-code users do not need to manage shell environment variables. Do not put raw API keys into `config/llm.toml`.
 
-After changing LLM settings, restart the app or run a new report from **操作台**.
+After changing LLM settings, run a new report from **操作台**.
 
 ### 6. Create A Daily Schedule
 
@@ -311,7 +313,7 @@ Start the dashboard:
 github-ai-radar serve --open
 ```
 
-Install or remove the macOS app launcher:
+Install or remove the macOS app:
 
 ```bash
 github-ai-radar app install
@@ -351,10 +353,10 @@ Core modules:
 
 ## Roadmap
 
-- v0.3: local dashboard and macOS app launcher.
-- v0.4: official-source event collection for AI finance/high-tech and AI biopharma.
-- v0.5: richer tracking views, watchlist history, and trend charts.
-- v0.6: package release automation and PyPI distribution.
+- v0.4: direct dashboard settings and native macOS WebKit app window.
+- v0.5: official-source event collection for AI finance/high-tech and AI biopharma.
+- v0.6: richer tracking views, watchlist history, and trend charts.
+- v0.7: package release automation and PyPI distribution.
 - v1.0: stable local app with scheduler, reports, audit trail, and optional LLM-assisted analysis.
 
 ## Documentation

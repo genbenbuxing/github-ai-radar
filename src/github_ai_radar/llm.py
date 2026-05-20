@@ -5,7 +5,10 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+from github_ai_radar.config import configured_secret
 
 
 @dataclass(frozen=True)
@@ -16,13 +19,16 @@ class LLMConfig:
     model: str
     api_key_env: str
     timeout_seconds: int = 60
+    root: Path | None = None
 
     @property
     def api_key(self) -> str | None:
+        if self.root is not None:
+            return configured_secret(self.root, self.api_key_env)
         return os.environ.get(self.api_key_env)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LLMConfig":
+    def from_dict(cls, data: dict[str, Any], root: Path | None = None) -> "LLMConfig":
         return cls(
             enabled=bool(data.get("enabled", False)),
             provider=str(data.get("provider", "openai_compatible")),
@@ -30,6 +36,7 @@ class LLMConfig:
             model=str(data.get("model", "gpt-4.1-mini")),
             api_key_env=str(data.get("api_key_env", "OPENAI_API_KEY")),
             timeout_seconds=int(data.get("timeout_seconds", 60)),
+            root=root,
         )
 
 

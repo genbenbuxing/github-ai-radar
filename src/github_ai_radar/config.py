@@ -6,6 +6,8 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
+import tomli_w
+
 try:  # Python 3.11+
     import tomllib
 except ModuleNotFoundError:  # Python 3.9/3.10
@@ -39,6 +41,30 @@ def _load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(default)
 
 
+def _write_toml(path: Path, payload: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("wb") as handle:
+        tomli_w.dump(payload, handle)
+    tmp.replace(path)
+    return path
+
+
+def load_config_file(root: Path, name: str) -> dict[str, Any]:
+    if name not in DEFAULT_FILES and name != "llm.toml":
+        raise ValueError(f"Unsupported config file: {name}")
+    config_dir = root / "config"
+    if name == "llm.toml" and not (config_dir / name).exists():
+        return _load_toml(config_dir / "llm.toml.example")
+    return _load_toml(config_dir / name)
+
+
+def write_config_file(root: Path, name: str, payload: dict[str, Any]) -> Path:
+    if name not in DEFAULT_FILES and name != "llm.toml":
+        raise ValueError(f"Unsupported config file: {name}")
+    return _write_toml(root / "config" / name, payload)
+
+
 def ensure_default_config(root: Path) -> list[Path]:
     config_dir = root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -50,6 +76,58 @@ def ensure_default_config(root: Path) -> list[Path]:
         path.write_text(content, encoding="utf-8")
         written.append(path)
     return written
+
+
+def secrets_path(root: Path) -> Path:
+    return root / "config" / "secrets.env"
+
+
+def load_secrets(root: Path) -> dict[str, str]:
+    path = secrets_path(root)
+    if not path.exists():
+        return {}
+    secrets: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            secrets[key] = value
+    return secrets
+
+
+def write_secret(root: Path, key: str, value: str) -> Path:
+    if not key:
+        raise ValueError("Secret environment variable name is required")
+    if any(char.isspace() for char in key) or "=" in key:
+        raise ValueError("Secret environment variable name must not contain whitespace or '='")
+    path = secrets_path(root)
+    secrets = load_secrets(root)
+    if value:
+        secrets[key] = value
+    elif key in secrets:
+        del secrets[key]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Local private secrets for GitHub AI Radar.",
+        "# This file is ignored by git. Do not publish it.",
+    ]
+    for item_key in sorted(secrets):
+        escaped = secrets[item_key].replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'{item_key}="{escaped}"')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def configured_secret(root: Path, key: str | None) -> str | None:
+    if not key:
+        return None
+    import os
+
+    return os.environ.get(key) or load_secrets(root).get(key)
 
 
 def load_config(root: Path) -> AppConfig:
@@ -79,6 +157,7 @@ def llm_status(root: Path) -> dict[str, Any]:
     example_path = root / "config" / "llm.toml.example"
     config = _load_toml(llm_path).get("llm", {}) if llm_path.exists() else {}
     api_key_env = config.get("api_key_env")
+    api_key = configured_secret(root, api_key_env)
     return {
         "configured": llm_path.exists(),
         "example_exists": example_path.exists(),
@@ -87,7 +166,10 @@ def llm_status(root: Path) -> dict[str, Any]:
         "base_url": config.get("base_url"),
         "model": config.get("model"),
         "api_key_env": api_key_env,
-        "api_key_present": bool(api_key_env and __import__("os").environ.get(api_key_env)),
+        "timeout_seconds": config.get("timeout_seconds"),
+        "api_key_present": bool(api_key),
+        "secrets_file": str(secrets_path(root)),
+        "secrets_file_exists": secrets_path(root).exists(),
     }
 
 

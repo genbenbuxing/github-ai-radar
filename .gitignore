@@ -2,6 +2,7 @@
 data/
 reports/
 config/llm.toml
+config/secrets.env
 
 # Python
 __pycache__/
