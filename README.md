@@ -2,9 +2,9 @@
 
 **A local, auditable radar for GitHub AI projects.**
 
-GitHub AI Radar helps you discover and track open-source projects in AI applications, agents, computer use, memory, RAG, MCP, image recognition, AI biopharma, and high-tech finance. It stores structured snapshots locally, scores candidates conservatively, and generates daily Markdown plus audit JSON reports.
+GitHub AI Radar helps you discover and track open-source projects in AI applications, agents, computer use, memory, RAG, MCP, image recognition, AI biopharma, and high-tech finance. It stores structured snapshots locally, scores candidates conservatively, and generates daily HTML reading reports, Markdown source files, and audit JSON records.
 
-Current release boundary: the working product is a GitHub project radar. Finance/high-tech and biopharma event sections are present in the report structure, but automatic external news, announcement, regulatory, and paper collection is not enabled yet. Those external-source settings are kept as next-stage planning fields so the app does not pretend to have collected sources it has not actually read.
+Current release boundary: the working product collects GitHub repository signals and a lightweight external-source event radar. External event collection reads RSS/Atom/public news feeds and records candidate events with source links; it does not paywall-bypass, scrape private pages, or execute third-party code.
 
 The app is intentionally local-first. Your database, reports, watchlist, and API configuration stay on your machine.
 
@@ -15,12 +15,15 @@ The app is intentionally local-first. Your database, reports, watchlist, and API
 - Stores daily repository snapshots in SQLite.
 - Computes 3-day, 7-day, and 30-day star growth from local history.
 - Scores projects using relevance, usability evidence, README quality, maintenance, community signal, license, novelty, growth, and safety.
-- Generates a readable daily Markdown report and a machine-readable audit JSON file.
+- Generates a readable daily HTML report, a Markdown source file, and a machine-readable audit JSON file.
 - Serves a local HTML dashboard for browsing reports, audit files, and recent repository reviews.
+- Shows system health for GitHub CLI auth, the database, daily schedule, optional LLM API, and the latest report.
+- Provides a report center with HTML reading links, Markdown source files, audit JSON, top project, event counts, and risk counts.
 - Installs a macOS `.app` launcher so the dashboard can be opened from Finder, Spotlight, or Launchpad.
 - Installs a macOS `launchd` schedule so daily runs can happen without Codex.
 - Supports optional local LLM configuration for future deeper analysis through OpenAI-compatible APIs.
-- Keeps external finance, high-tech, and biopharma source queries as visible planned fields, but does not use them until the official-source collector is implemented.
+- Collects lightweight external finance, high-tech, and biopharma events from RSS/Atom/public news queries and stores source links for audit.
+- Adds a no-code local app interface with a pixel cat logo and direct controls for GitHub queries, external sources, scoring, automation, and LLM API settings.
 
 ## Safety Model
 
@@ -47,7 +50,7 @@ gh auth login
 Install from the release tag with `pipx`:
 
 ```bash
-pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.4.1"
+pipx install "git+https://github.com/genbenbuxing/github-ai-radar.git@v0.5.0"
 ```
 
 Or install from a local checkout:
@@ -63,7 +66,7 @@ pip install -e .
 You can also download the wheel from GitHub Releases and install it directly:
 
 ```bash
-python -m pip install github_ai_radar-0.4.1-py3-none-any.whl
+python -m pip install github_ai_radar-0.5.0-py3-none-any.whl
 ```
 
 Initialize local state:
@@ -83,10 +86,12 @@ Generated files:
 
 ```text
 data/radar.sqlite
+reports/github-radar/YYYY-MM-DD.html
 reports/github-radar/YYYY-MM-DD.md
 reports/github-radar/YYYY-MM-DD.audit.json
 reports/github-radar/state/YYYY-MM-DD.state.json
 reports/github-radar/raw/github/YYYY-MM-DD.json
+reports/github-radar/raw/sources/YYYY-MM-DD.json
 ```
 
 ## Local Dashboard And App
@@ -114,8 +119,8 @@ Then open **GitHub AI Radar** from `~/Applications`, Finder, Spotlight, or Launc
 The local app is organized for non-coders:
 
 - **操作台**: generate a report now, see the latest task stage, and jump to common actions.
-- **结果**: open generated Markdown reports, audit JSON files, and recent project reviews.
-- **参数**: edit collection directions, GitHub queries, scoring rules, run settings, and LLM API directly in the app.
+- **结果**: open generated HTML reading reports, Markdown source files, audit JSON files, and recent project reviews from the report center.
+- **参数**: edit collection directions, run settings, and LLM API directly in the app; advanced queries and scoring stay folded until needed.
 - **自动化**: enable or stop the daily schedule, inspect run stages, and open logs.
 
 Check or remove the app:
@@ -140,8 +145,8 @@ http://127.0.0.1:8765/
 The app has four main pages:
 
 - **操作台**: run a report now and see the latest run stage.
-- **结果**: open generated reports, audit JSON files, and recent project reviews.
-- **参数**: edit collection directions, GitHub queries, scoring, run settings, and LLM settings directly in the app.
+- **结果**: open generated HTML reading reports, Markdown source files, audit JSON files, and recent project reviews from the report center.
+- **参数**: edit common settings directly, with advanced queries and scoring folded away until needed.
 - **自动化**: enable or stop the daily schedule, inspect stages, and open logs.
 
 ### 2. Generate A Report Now
@@ -165,20 +170,22 @@ github-ai-radar run --once --timezone Asia/Shanghai --max-candidates 100 --deep-
 In the app:
 
 1. Open **结果**.
-2. Click **打开报告** to read the Markdown report.
-3. Click **审计 JSON** to inspect the machine-readable audit record.
+2. Click **HTML 阅读版** to read the report in a browser-friendly layout.
+3. Click **Markdown** to inspect the source text, or **审计 JSON** to inspect the machine-readable audit record.
 4. Click **打开报告文件夹** to see all local report artifacts.
 
 Report files are stored locally:
 
 ```text
+reports/github-radar/YYYY-MM-DD.html
 reports/github-radar/YYYY-MM-DD.md
 reports/github-radar/YYYY-MM-DD.audit.json
 reports/github-radar/state/YYYY-MM-DD.state.json
 reports/github-radar/raw/github/YYYY-MM-DD.json
+reports/github-radar/raw/sources/YYYY-MM-DD.json
 ```
 
-The Markdown report is for reading. The audit JSON is for traceability: GitHub queries, checked repositories, scoring notes, growth evidence, artifacts, risks, and uncertainty. External event source URLs will appear after the official-source collector is implemented.
+The HTML report is for reading. The Markdown file is the portable source text. The audit JSON is for traceability: GitHub queries, checked repositories, external event source URLs, scoring notes, growth evidence, artifacts, risks, and uncertainty.
 
 ### 4. Edit Collection Directions
 
@@ -202,13 +209,13 @@ github_terms = [
   "another keyword"
 ]
 source_terms = [
-  "my external source query for a later release"
+  "my external source query"
 ]
 ```
 
 Use **采集方向** when you want to describe what you care about. Use **查询规则** only when you want precise GitHub search syntax such as `stars:>=50`, `created:>=${date_minus_14}`, `pushed:>=${date_minus_30}`, or `topic:ai-agent`.
 
-In the current release, `github_terms` affect the next report immediately. `source_terms` are saved for the planned external event radar and do not change today's report.
+In the current release, `github_terms` affect the next GitHub repository search. `source_terms` affect the external-source event sections. For precise external collection, open **查询规则** and edit **外部来源查询**; plain text queries use public RSS/news feeds, and direct RSS/Atom URLs are read as-is.
 
 ### 5. Configure Your Own LLM API
 
@@ -283,8 +290,9 @@ Stages:
 - **准备环境**: create folders and database.
 - **检索 GitHub**: run GitHub searches.
 - **阅读 README**: read repository metadata and README snippets.
+- **采集外部来源**: read RSS/Atom/public news source candidates.
 - **评分排序**: score candidates.
-- **生成报告**: write the Markdown report.
+- **生成报告**: write the HTML reading report and Markdown source file.
 - **生成审计记录**: write the audit JSON.
 - **验证文件**: check report artifacts.
 - **完成**: the report is ready.
@@ -344,14 +352,15 @@ data/                   Local SQLite database, ignored by git
 reports/                Local generated reports, ignored by git
 ```
 
-Current data boundary: `github_client`, `storage`, `scorer`, `reporter`, `web`, `app_launcher`, `scheduler`, and `doctor` are active. External source/event collection tables and config fields are reserved for v0.5 and should be read as roadmap placeholders in this release.
+Current data boundary: `github_client`, `source_collector`, `storage`, `scorer`, `reporter`, `web`, `app_launcher`, `scheduler`, and `doctor` are active. External source collection is deliberately lightweight and audit-oriented: it records candidate event links and separates facts from inference, but it does not replace manual validation of primary sources.
 
 Core modules:
 
 - `github_client`: GitHub search and read-only repository inspection.
+- `source_collector`: RSS/Atom/public news event collection for finance/high-tech, biopharma, and AI application ecosystem signals.
 - `storage`: SQLite schema, snapshots, reviews, events, watchlist, run records.
 - `scorer`: Conservative scoring and trend calculation.
-- `reporter`: Markdown and audit JSON rendering.
+- `reporter`: HTML, Markdown, and audit JSON rendering.
 - `web`: local HTML dashboard and status API.
 - `app_launcher`: macOS `.app` launcher generation.
 - `scheduler`: macOS launchd integration.
@@ -360,9 +369,9 @@ Core modules:
 
 ## Roadmap
 
-- v0.4.1: clearer no-code UI copy, removal of inactive external-source edit traps, and release documentation alignment.
+- v0.5: active external-source collector, persisted event/source records, editable external queries, and pixel cat app branding.
+- v0.4.1: clearer no-code UI copy, release documentation alignment, and explicit inactive-source boundary.
 - v0.4: direct dashboard settings and native macOS WebKit app window.
-- v0.5: official-source event collection for AI finance/high-tech and AI biopharma.
 - v0.6: richer tracking views, watchlist history, and trend charts.
 - v0.7: package release automation and PyPI distribution.
 - v1.0: stable local app with scheduler, reports, audit trail, and optional LLM-assisted analysis.

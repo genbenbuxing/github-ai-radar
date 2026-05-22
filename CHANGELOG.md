@@ -4,6 +4,18 @@ All notable changes to GitHub AI Radar will be documented here.
 
 The project uses semantic versioning.
 
+## [0.5.0] - 2026-05-22
+
+### Added
+
+- Active external-source collector for RSS/Atom/public-news event candidates.
+- Persisted external source and event records in SQLite.
+- Editable external-source queries and source keywords in the no-code settings page.
+- External event sections in Markdown reports and audit JSON.
+- HTML reading report export and an in-app Markdown fallback reader for older reports.
+- Report center cards, system health checks, clearer task progress, stage explanations, and folded advanced settings for no-code users.
+- Pixel cat branding in the local dashboard and generated macOS app icon.
+
 ## [0.4.1] - 2026-05-20
 
 ### Fixed

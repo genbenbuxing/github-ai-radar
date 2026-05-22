@@ -22,11 +22,11 @@ Per-run read-only analysis, including score, recommendation, README quality, usa
 
 ### events
 
-Reserved for the planned external finance/high-tech and AI-biopharma event collector. The current release does not populate this table.
+External finance/high-tech, AI-biopharma, and AI application ecosystem event candidates. Each row stores event date, domain, title, source URL, source name, summary, facts, and inference notes.
 
 ### sources
 
-Reserved source URL metadata, publisher, source type, fetch time, and trust notes for the planned event collector. Current audit files only include GitHub repository and artifact URLs.
+Source URL metadata, publisher, source type, fetch time, and trust notes for the external event collector.
 
 ### watchlist
 

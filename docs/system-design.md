@@ -1,6 +1,6 @@
 # System Design
 
-GitHub AI Radar is a local research system for discovering, tracking, scoring, and auditing AI-related open-source projects. The data model and report outline reserve space for adjacent finance/high-tech and biopharma events, but the current released app only collects GitHub repository data.
+GitHub AI Radar is a local research system for discovering, tracking, scoring, and auditing AI-related open-source projects plus lightweight external events from RSS/Atom/public news sources.
 
 ## Product Boundary
 
@@ -10,21 +10,21 @@ The system focuses on three domains:
 2. International finance and high technology: AI companies, chips, cloud, capital markets, regulation, supply chains, mergers, earnings, fintech, quantitative workflows, and risk systems.
 3. AI biopharma: AI drug discovery, protein design, genomics, clinical trial automation, biology foundation models, pharma collaborations, and regulatory changes.
 
-Phase 1 is read-only. The app does not clone, install, or execute discovered projects. External event collection is planned for the next phase and is intentionally labelled as inactive in the UI.
+Phase 1 is read-only. The app does not clone, install, or execute discovered projects. External event collection reads only public feed/query results and stores source links for audit.
 
 ## Components
 
 ```text
-collector       Finds GitHub repositories. External source collection is planned.
-storage         Persists repositories, snapshots, reviews, watchlist, and run artifacts. Event tables are reserved.
+collector       Finds GitHub repositories and public external source candidates.
+storage         Persists repositories, snapshots, reviews, events, sources, watchlist, and run artifacts.
 reviewer        Performs read-only README/metadata/source-snippet analysis.
 scorer          Computes relevance, quality, risk, and trend scores.
-reporter        Generates Markdown and audit JSON outputs.
+reporter        Generates HTML, Markdown, and audit JSON outputs.
 recovery        Writes state and logs for visibility. Stage-level resume is planned.
 scheduler       Runs the app daily without Codex.
 doctor          Diagnoses local GitHub auth, config, database, and scheduler.
 llm             Optional OpenAI-compatible API helper for future deeper analysis.
-app shell       Later desktop/web UI for viewing reports and decisions.
+app shell       Local web/native shell for viewing reports, settings, automation, and run state.
 ```
 
 ## Daily Pipeline
@@ -39,14 +39,10 @@ app shell       Later desktop/web UI for viewing reports and decisions.
 8. Compute 3-day, 7-day, and 30-day star growth when local history exists.
 9. Inspect README, license, releases, topics, file tree, and small source snippets.
 10. Score candidates and apply penalties.
-11. Render Markdown report and audit JSON.
-12. Verify files and mark state as completed.
-
-Planned next phase:
-
-- discover high-signal finance/high-tech and AI-biopharma events from official and high-trust sources
-- attach source URLs and trust notes to the audit JSON
-- update event watchlists and decisions
+11. Collect external event candidates through RSS/Atom/public-news queries.
+12. Upsert source and event records.
+13. Render HTML report, Markdown source file, and audit JSON.
+14. Verify files and mark state as completed.
 
 ## Checkpoint Model
 
@@ -56,6 +52,7 @@ Each run is split into stages:
 init
 github_search
 github_readme_review
+event_sources
 scoring
 markdown_render
 audit_json_render
@@ -71,7 +68,7 @@ After each stage, the app writes:
 - output artifact paths
 - error summaries
 
-The current released pipeline includes `init`, `github_search`, `github_readme_review`, `scoring`, `markdown_render`, `audit_json_render`, `final_verify`, and `completed`. The state file supports UI progress, auditability, and manual diagnosis. True stage-level resume from partial files is a planned stability feature, not an active guarantee in this release. `event_sources` is reserved for the planned external-source collector.
+The current released pipeline includes `init`, `github_search`, `github_readme_review`, `event_sources`, `scoring`, `markdown_render`, `audit_json_render`, `final_verify`, and `completed`. The state file supports UI progress, auditability, and manual diagnosis. True stage-level resume from partial files is a planned stability feature, not an active guarantee in this release.
 
 ## Data Ownership
 

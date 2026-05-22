@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import platform
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -15,6 +16,7 @@ from urllib.parse import parse_qs, unquote, urlencode, urlparse
 from github_ai_radar.config import load_config, load_config_file, llm_status, write_config_file, write_secret
 from github_ai_radar.paths import RadarPaths
 from github_ai_radar.pipeline import STAGES, run_once
+from github_ai_radar.reporter import render_markdown_as_html
 from github_ai_radar.scheduler import install_launchd, launchd_status, uninstall_launchd
 from github_ai_radar.storage import table_counts
 
@@ -23,6 +25,7 @@ STAGE_LABELS = {
     "init": "准备环境",
     "github_search": "检索 GitHub",
     "github_readme_review": "阅读 README",
+    "event_sources": "采集外部来源",
     "scoring": "评分排序",
     "markdown_render": "生成报告",
     "audit_json_render": "生成审计记录",
@@ -30,8 +33,73 @@ STAGE_LABELS = {
     "completed": "完成",
 }
 
+STAGE_DESCRIPTIONS = {
+    "init": "创建目录、读取配置并准备数据库。",
+    "github_search": "根据关注方向和 GitHub 查询规则拉取候选项目。",
+    "github_readme_review": "只读读取项目元数据和 README，不 clone、不执行代码。",
+    "event_sources": "读取外部 RSS/Atom/公开新闻源，筛选候选事件。",
+    "scoring": "结合文档、活跃度、License、风险和 star 增长计算分数。",
+    "markdown_render": "写入 HTML 阅读版和 Markdown 源文件。",
+    "audit_json_render": "写入机器可读审计记录。",
+    "final_verify": "检查报告、HTML、审计 JSON 是否完整可读。",
+    "completed": "报告已经生成，可以在结果页阅读。",
+}
+
+FAILURE_HINTS = {
+    "init": "请先运行初始化，或检查当前目录是否可写。",
+    "github_search": "请检查 GitHub CLI 是否已安装并完成登录，也确认网络可访问 GitHub。",
+    "github_readme_review": "通常是单个仓库读取失败或 GitHub API 限制，可稍后重试。",
+    "event_sources": "通常是外部 RSS/新闻源超时，可稍后重试或减少外部来源查询。",
+    "markdown_render": "请检查报告目录是否可写。",
+    "audit_json_render": "请检查报告目录是否可写，并确认磁盘空间充足。",
+    "final_verify": "报告文件存在但校验失败，请查看日志中的具体错误。",
+}
+
 _RUN_LOCK = threading.Lock()
 _RUN_JOBS: dict[str, dict[str, object]] = {}
+
+_PIXEL_CAT = (
+    "................",
+    "...KK....KK.....",
+    "..KGGK..KGGK....",
+    "..KGGKKKKGGK....",
+    ".KGGGGGGGGGGK...",
+    ".KGGWGGGGWGGK...",
+    ".KGGGBGGBGGGK...",
+    ".KGGGGPPGGGGK...",
+    ".KGGGPKKPGGGK...",
+    "..KGGGWWGGGK....",
+    "...KKGGGGKK.....",
+    "....KYYYYK......",
+    "...KGGGGGGK.....",
+    "...KGG..GGK.....",
+    "....KK..KK......",
+    "................",
+)
+_PIXEL_CAT_COLORS = {
+    "K": "#273142",
+    "G": "#d9e3ef",
+    "W": "#fff7dc",
+    "P": "#f4a3b8",
+    "B": "#2563eb",
+    "Y": "#f6c343",
+}
+
+
+def _pixel_cat_logo() -> str:
+    rects = []
+    for y, row in enumerate(_PIXEL_CAT):
+        for x, key in enumerate(row):
+            color = _PIXEL_CAT_COLORS.get(key)
+            if color:
+                rects.append(f'<rect x="{x}" y="{y}" width="1" height="1" fill="{color}"/>')
+    return (
+        '<svg class="pixel-cat" viewBox="0 0 16 16" role="img" aria-label="像素风小猫 logo" '
+        'shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="0" y="0" width="16" height="16" rx="3" fill="#f8fafc"/>'
+        f"{''.join(rects)}"
+        "</svg>"
+    )
 
 
 def _read_json(path: Path) -> dict:
@@ -43,22 +111,56 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+def _report_metadata(audit_path: Path) -> dict[str, object]:
+    audit = _read_json(audit_path)
+    reviews = audit.get("reviews") or []
+    events = audit.get("external_events") or []
+    top_review = None
+    if isinstance(reviews, list) and reviews:
+        top_review = max(reviews, key=lambda item: int(item.get("score", {}).get("score") or 0))
+    top_repo = "-"
+    top_score = "-"
+    if isinstance(top_review, dict):
+        repo = top_review.get("repo") or {}
+        score = top_review.get("score") or {}
+        top_repo = str(repo.get("full_name") or "-")
+        top_score = str(score.get("score") or "-")
+    risk_count = 0
+    for review in reviews if isinstance(reviews, list) else []:
+        score = review.get("score") if isinstance(review, dict) else {}
+        risk = str((score or {}).get("risk_notes") or "").strip().lower()
+        benign = {"-", "none", "no obvious risk", "no major read-only risk signal found."}
+        if risk and risk not in benign and "no major read-only risk" not in risk:
+            risk_count += 1
+    return {
+        "review_count": len(reviews) if isinstance(reviews, list) else 0,
+        "event_count": len(events) if isinstance(events, list) else 0,
+        "top_repo": top_repo,
+        "top_score": top_score,
+        "risk_count": risk_count,
+    }
+
+
 def _reports(paths: RadarPaths) -> list[dict]:
     reports: list[dict] = []
     for markdown in sorted(paths.reports_dir.glob("*.md"), reverse=True):
         date = markdown.stem
+        html_report = paths.reports_dir / f"{date}.html"
         audit = paths.reports_dir / f"{date}.audit.json"
         state = paths.state_dir / f"{date}.state.json"
         state_payload = _read_json(state)
+        metadata = _report_metadata(audit)
         reports.append(
             {
                 "date": date,
                 "markdown": markdown,
+                "html": html_report,
                 "audit": audit,
                 "state": state,
                 "status": state_payload.get("status", "unknown"),
-                "size": markdown.stat().st_size,
+                "size": html_report.stat().st_size if html_report.exists() else markdown.stat().st_size,
                 "state_payload": state_payload,
+                **metadata,
             }
         )
     return reports
@@ -99,6 +201,77 @@ def _logs(paths: RadarPaths) -> list[dict]:
     for path in sorted(paths.logs_dir.glob("*.log")):
         items.append({"name": path.name, "path": path, "size": path.stat().st_size})
     return items
+
+
+def _quick_command(command: list[str], timeout: int = 4) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    output = (completed.stdout or completed.stderr).strip()
+    return completed.returncode == 0, output
+
+
+def _health_items(paths: RadarPaths, state: dict | None = None) -> list[dict[str, str]]:
+    state = state or _latest_state(paths)
+    gh_path = shutil.which("gh")
+    if gh_path:
+        gh_ok, gh_output = _quick_command(["gh", "auth", "status"])
+        gh_detail = "已登录" if gh_ok else (gh_output.splitlines()[0] if gh_output else "未完成登录")
+    else:
+        gh_ok = False
+        gh_detail = "未找到 gh 命令"
+
+    schedule = launchd_status()
+    llm = llm_status(paths.root)
+    report_ok = state.get("status") == "completed"
+    db_ok = paths.database.exists()
+    items = [
+        {
+            "label": "GitHub CLI",
+            "status": "正常" if gh_ok else "需要处理",
+            "detail": gh_detail,
+            "tone": "ok" if gh_ok else "bad",
+        },
+        {
+            "label": "本地数据库",
+            "status": "正常" if db_ok else "未初始化",
+            "detail": str(paths.database),
+            "tone": "ok" if db_ok else "warn",
+        },
+        {
+            "label": "每日任务",
+            "status": "已启用" if schedule.get("loaded") else "未启用",
+            "detail": "自动化页可调整时间",
+            "tone": "ok" if schedule.get("loaded") else "warn",
+        },
+        {
+            "label": "LLM API",
+            "status": "已配置" if llm.get("api_key_present") else "可选",
+            "detail": str(llm.get("model") or "未配置"),
+            "tone": "ok" if llm.get("api_key_present") else "warn",
+        },
+        {
+            "label": "最近报告",
+            "status": "成功" if report_ok else "待生成",
+            "detail": str(state.get("report_date") or "还没有完成报告"),
+            "tone": "ok" if report_ok else "warn",
+        },
+    ]
+    return items
+
+
+def _health_panel(paths: RadarPaths, state: dict) -> str:
+    rows = []
+    for item in _health_items(paths, state):
+        rows.append(
+            '<div class="health-item">'
+            f'<span class="pill {html.escape(item["tone"])}">{html.escape(item["status"])}</span>'
+            f'<strong>{html.escape(item["label"])}</strong>'
+            f'<span class="muted">{html.escape(item["detail"])}</span>'
+            "</div>"
+        )
+    return "\n".join(rows)
 
 
 def _notice(query: str) -> str:
@@ -291,20 +464,31 @@ def _save_topics(paths: RadarPaths, values: dict[str, list[str]]) -> str:
 def _save_queries(paths: RadarPaths, values: dict[str, list[str]]) -> str:
     payload = load_config_file(paths.root, "queries.toml")
     github_count = _parse_bounded_int(values, "github_query_count", 0, 0, 200)
+    source_count = _parse_bounded_int(values, "source_query_count", 0, 0, 200)
     github_queries: list[dict[str, str]] = []
+    source_queries: list[dict[str, str]] = []
     for index in range(github_count):
         name = _form_value(values, f"github_query_{index}_name")
         query = _form_value(values, f"github_query_{index}_query")
         if name and query:
             github_queries.append({"name": name, "query": query})
+    for index in range(source_count):
+        name = _form_value(values, f"source_query_{index}_name")
+        query = _form_value(values, f"source_query_{index}_query")
+        if name and query:
+            source_queries.append({"name": name, "query": query})
     new_name = _form_value(values, "new_github_query_name")
     new_query = _form_value(values, "new_github_query")
     if new_name and new_query:
         github_queries.append({"name": new_name, "query": new_query})
+    new_source_name = _form_value(values, "new_source_query_name")
+    new_source_query = _form_value(values, "new_source_query")
+    if new_source_name and new_source_query:
+        source_queries.append({"name": new_source_name, "query": new_source_query})
     payload["github_queries"] = github_queries
-    payload["source_queries"] = payload.get("source_queries", [])
+    payload["source_queries"] = source_queries
     write_config_file(paths.root, "queries.toml", payload)
-    return "GitHub 查询规则已保存。外部来源查询是下一阶段预留项，本次未改动。"
+    return "查询规则已保存。GitHub 查询和外部来源查询会在下一次报告中生效。"
 
 
 def _save_scoring(paths: RadarPaths, values: dict[str, list[str]]) -> str:
@@ -404,8 +588,20 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
       color: white;
       padding: 22px 18px;
     }}
+    .brand-lockup {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; align-items: center; margin-bottom: 24px; }}
+    .app-logo {{
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      background: #f8fafc;
+      display: grid;
+      place-items: center;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 8px 22px rgba(0,0,0,.22);
+      overflow: hidden;
+    }}
+    .pixel-cat {{ width: 36px; height: 36px; display: block; image-rendering: pixelated; }}
     .brand {{ font-size: 18px; font-weight: 700; margin-bottom: 4px; }}
-    .brand-sub {{ color: #bdc7d8; font-size: 12px; margin-bottom: 24px; }}
+    .brand-sub {{ color: #bdc7d8; font-size: 12px; }}
     nav a {{
       display: block;
       color: #dce6f5;
@@ -425,12 +621,14 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
     .grid-2 {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     .grid-3 {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
     .grid-4 {{ grid-template-columns: repeat(4, minmax(0, 1fr)); }}
+    .grid-5 {{ grid-template-columns: repeat(5, minmax(0, 1fr)); }}
     .panel {{
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 16px;
     }}
+    .panel.soft {{ background: #fbfcfe; }}
     .metric {{ font-size: 26px; font-weight: 760; margin-top: 4px; }}
     .muted {{ color: var(--muted); }}
     .section {{ margin-top: 18px; }}
@@ -476,6 +674,47 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
     .pill.ok {{ color: var(--good); background: #dff8ec; }}
     .pill.warn {{ color: var(--warn); background: #fff3cf; }}
     .pill.bad {{ color: var(--bad); background: #fee4e2; }}
+    .health-grid {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }}
+    .health-item {{
+      display: grid;
+      gap: 6px;
+      align-content: start;
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 12px;
+    }}
+    .report-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }}
+    .report-card {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }}
+    .report-card-head {{ display: flex; justify-content: space-between; gap: 10px; align-items: start; }}
+    .report-title {{ font-size: 17px; font-weight: 760; overflow-wrap: anywhere; }}
+    .mini-metrics {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }}
+    .mini-metric {{ border: 1px solid var(--line); border-radius: 8px; background: white; padding: 8px; }}
+    .mini-metric strong {{ display: block; font-size: 18px; line-height: 1.2; }}
+    .settings-tabs {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }}
+    .settings-tabs a {{ border: 1px solid var(--line); background: white; border-radius: 8px; padding: 8px 10px; font-weight: 700; color: var(--ink); }}
+    details.disclosure {{ padding: 0; overflow: hidden; }}
+    details.disclosure > summary {{
+      cursor: pointer;
+      list-style: none;
+      padding: 16px;
+      font-weight: 760;
+      border-bottom: 1px solid var(--line);
+    }}
+    details.disclosure > summary::-webkit-details-marker {{ display: none; }}
+    .details-body {{ padding: 16px; }}
+    .progress-shell {{ display: grid; gap: 8px; margin-bottom: 12px; }}
+    .progress-label {{ display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-weight: 700; }}
+    .progress-track {{ height: 10px; background: var(--soft); border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }}
+    .progress-fill {{ height: 100%; background: linear-gradient(90deg, #0b63ce, #0a7a4b); }}
     .timeline {{ display: grid; gap: 8px; }}
     .stage {{
       display: grid;
@@ -491,6 +730,8 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
     .stage.done .dot {{ background: var(--good); }}
     .stage.running .dot {{ background: var(--warn); }}
     .stage.failed .dot {{ background: var(--bad); }}
+    .stage.skipped .dot {{ background: #8a94a6; }}
+    .stage-desc {{ color: var(--muted); font-size: 12px; margin-top: 2px; }}
     .notice {{ padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--line); background: white; }}
     .notice.ok {{ border-color: #b7ebcc; background: #ecfdf3; color: var(--good); }}
     .notice.bad {{ border-color: #fecdca; background: #fff1f0; color: var(--bad); }}
@@ -530,7 +771,7 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
       nav {{ display: flex; gap: 6px; flex-wrap: wrap; }}
       nav a {{ margin-bottom: 0; }}
       main {{ padding: 18px; }}
-      .grid-2, .grid-3, .grid-4, .form-grid, .settings-form .row, .settings-form .row-3 {{ grid-template-columns: 1fr; }}
+      .grid-2, .grid-3, .grid-4, .grid-5, .form-grid, .settings-form .row, .settings-form .row-3, .health-grid, .report-grid, .mini-metrics {{ grid-template-columns: 1fr; }}
       .stage {{ grid-template-columns: 22px minmax(0, 1fr); }}
       .stage .muted {{ grid-column: 2; }}
     }}
@@ -539,8 +780,13 @@ def _html_page(title: str, body: str, active: str = "home") -> bytes:
 <body>
   <div class="shell">
     <aside>
-      <div class="brand">GitHub AI Radar</div>
-      <div class="brand-sub">本地研究雷达控制台</div>
+      <div class="brand-lockup">
+        <div class="app-logo">{_pixel_cat_logo()}</div>
+        <div>
+          <div class="brand">GitHub AI Radar</div>
+          <div class="brand-sub">本地研究雷达控制台</div>
+        </div>
+      </div>
       <nav>{nav_html}</nav>
     </aside>
     <main>{body}</main>
@@ -567,6 +813,10 @@ def _stage_items(state: dict) -> str:
         elif state.get("status") == "failed" and index == last_index + 1:
             class_name = "failed"
             label = "失败"
+        elif state.get("status") == "completed" and index <= last_index:
+            class_name = "skipped"
+            label = "未记录"
+            item = {"completed_at": "旧版本运行未包含此阶段"}
         else:
             class_name = "pending"
             label = "等待"
@@ -575,23 +825,66 @@ def _stage_items(state: dict) -> str:
             detail_parts.append(f"候选 {item['candidate_count']} 个")
         if "review_count" in item:
             detail_parts.append(f"深读 {item['review_count']} 个")
+        if "event_count" in item:
+            detail_parts.append(f"外部事件 {item['event_count']} 条")
         if item.get("path"):
             detail_parts.append(str(item["path"]))
+        if item.get("html_path"):
+            detail_parts.append(str(item["html_path"]))
+        if item.get("raw_path"):
+            detail_parts.append(str(item["raw_path"]))
         detail = " / ".join(detail_parts) or _format_dt(item.get("completed_at"))
         rows.append(
             '<div class="stage {class_name}">'
             '<span class="dot"></span>'
-            '<div><strong>{name}</strong><div class="muted">{detail}</div></div>'
+            '<div><strong>{name}</strong><div class="stage-desc">{description}</div><div class="muted">{detail}</div></div>'
             '<span class="pill {pill}">{label}</span>'
             "</div>".format(
                 class_name=class_name,
                 name=html.escape(STAGE_LABELS.get(name, name)),
+                description=html.escape(STAGE_DESCRIPTIONS.get(name, "")),
                 detail=html.escape(detail),
-                pill="ok" if class_name == "done" else "warn" if class_name == "running" else "bad" if class_name == "failed" else "",
+                pill="ok" if class_name == "done" else "warn" if class_name in {"running", "skipped"} else "bad" if class_name == "failed" else "",
                 label=html.escape(label),
             )
         )
     return "\n".join(rows)
+
+
+def _stage_progress(state: dict) -> str:
+    completed = {item.get("name") for item in state.get("stages", []) if isinstance(item, dict)}
+    count = len([name for name in STAGES if name in completed])
+    if state.get("status") == "completed":
+        count = len(STAGES)
+    percent = int((count / len(STAGES)) * 100) if STAGES else 0
+    status = str(state.get("status") or "未生成")
+    return (
+        '<div class="progress-shell">'
+        f'<div class="progress-label"><span>任务进度</span><span>{html.escape(status)} · {percent}%</span></div>'
+        '<div class="progress-track">'
+        f'<div class="progress-fill" style="width:{percent}%"></div>'
+        "</div></div>"
+    )
+
+
+def _failure_hint(state: dict) -> str:
+    if state.get("status") != "failed":
+        return ""
+    last = str(state.get("last_successful_stage") or "init")
+    next_index = STAGES.index(last) + 1 if last in STAGES and STAGES.index(last) + 1 < len(STAGES) else 0
+    failed_stage = STAGES[next_index] if next_index < len(STAGES) else last
+    hint = FAILURE_HINTS.get(failed_stage, "请打开日志查看具体错误。")
+    errors = state.get("errors") or []
+    detail = ""
+    if errors and isinstance(errors[-1], dict):
+        detail = str(errors[-1].get("error") or "")
+    return (
+        '<div class="notice bad">'
+        f'最近一次任务失败：{html.escape(STAGE_LABELS.get(failed_stage, failed_stage))}。'
+        f'{html.escape(hint)}'
+        + (f'<br><span class="muted">{html.escape(detail)}</span>' if detail else "")
+        + "</div>"
+    )
 
 
 def _run_form(paths: RadarPaths) -> str:
@@ -625,12 +918,41 @@ def _report_rows(reports: list[dict], limit: int = 12) -> str:
         "<tr>"
         f"<td>{html.escape(item['date'])}</td>"
         f"<td><span class=\"pill {'ok' if item['status'] == 'completed' else 'warn'}\">{html.escape(str(item['status']))}</span></td>"
-        f"<td>{item['size']} bytes</td>"
-        f"<td><a href=\"/report/{html.escape(item['date'])}\">打开报告</a> · "
+        f"<td>{html.escape(str(item.get('review_count', 0)))}</td>"
+        f"<td>{html.escape(str(item.get('event_count', 0)))}</td>"
+        f"<td>{html.escape(str(item.get('top_repo') or '-'))}<br><span class=\"muted\">分数 {html.escape(str(item.get('top_score') or '-'))}</span></td>"
+        f"<td><a href=\"/report/{html.escape(item['date'])}\">HTML 阅读版</a> · "
+        f"<a href=\"/markdown/{html.escape(item['date'])}\">Markdown</a> · "
         f"<a href=\"/audit/{html.escape(item['date'])}\">审计 JSON</a></td>"
         "</tr>"
         for item in reports[:limit]
-    ) or '<tr><td colspan="4" class="muted">还没有报告。可以先回到操作台点击“立即生成报告”。</td></tr>'
+    ) or '<tr><td colspan="6" class="muted">还没有报告。可以先回到操作台点击“立即生成报告”。</td></tr>'
+
+
+def _report_cards(reports: list[dict], limit: int = 12) -> str:
+    cards = []
+    for item in reports[:limit]:
+        status_tone = "ok" if item["status"] == "completed" else "warn"
+        cards.append(
+            '<article class="report-card">'
+            '<div class="report-card-head">'
+            f'<div><div class="muted">报告日期</div><div class="report-title">{html.escape(item["date"])}</div></div>'
+            f'<span class="pill {status_tone}">{html.escape(str(item["status"]))}</span>'
+            "</div>"
+            f'<div class="muted">最高信号：{html.escape(str(item.get("top_repo") or "-"))} · 分数 {html.escape(str(item.get("top_score") or "-"))}</div>'
+            '<div class="mini-metrics">'
+            f'<div class="mini-metric"><strong>{html.escape(str(item.get("review_count", 0)))}</strong><span class="muted">项目分析</span></div>'
+            f'<div class="mini-metric"><strong>{html.escape(str(item.get("event_count", 0)))}</strong><span class="muted">外部事件</span></div>'
+            f'<div class="mini-metric"><strong>{html.escape(str(item.get("risk_count", 0)))}</strong><span class="muted">风险提示</span></div>'
+            "</div>"
+            '<div class="actions">'
+            f'<a class="button" href="/report/{html.escape(item["date"])}">阅读报告</a>'
+            f'<a class="button secondary" href="/markdown/{html.escape(item["date"])}">Markdown</a>'
+            f'<a class="button secondary" href="/audit/{html.escape(item["date"])}">审计 JSON</a>'
+            "</div>"
+            "</article>"
+        )
+    return "\n".join(cards) or '<div class="panel muted">还没有报告。可以先回到操作台点击“立即生成报告”。</div>'
 
 
 def _review_rows(paths: RadarPaths) -> str:
@@ -733,9 +1055,9 @@ def _topics_form(config: object) -> str:
       <div class="muted">当前版本会立即用于 GitHub 项目搜索。</div>
     </div>
     <div>
-      <label>外部来源关键词（下一阶段预留）</label>
+      <label>外部来源关键词，每行一个</label>
       {_textarea(prefix + "source_terms", _list_to_text(item.get("source_terms")), rows=5)}
-      <div class="muted">当前版本不会自动采集新闻、公告、监管文件或论文来源；这里先保留给后续事件雷达。</div>
+      <div class="muted">当前版本会用于外部来源采集，适合写公司公告、监管、论文、合作、财报等关键词。</div>
     </div>
   </div>
 </div>
@@ -753,7 +1075,7 @@ def _topics_form(config: object) -> str:
     </div>
     <div class="row">
       <div><label>GitHub 关键词，每行一个</label>{_textarea("new_topic_github_terms", "", rows=4)}<div class="muted">当前版本会立即用于 GitHub 搜索。</div></div>
-      <div><label>外部来源关键词（下一阶段预留）</label>{_textarea("new_topic_source_terms", "", rows=4)}<div class="muted">先记录方向，暂不参与当前报告生成。</div></div>
+      <div><label>外部来源关键词，每行一个</label>{_textarea("new_topic_source_terms", "", rows=4)}<div class="muted">用于外部 RSS/公开新闻源查询。</div></div>
     </div>
   </div>
   <div class="actions"><button class="button" type="submit">保存采集方向</button></div>
@@ -763,6 +1085,7 @@ def _topics_form(config: object) -> str:
 
 def _queries_form(config: object) -> str:
     github_items = []
+    source_items = []
     github_queries = getattr(config, "github_queries")
     source_queries = getattr(config, "source_queries")
     for index, item in enumerate(github_queries):
@@ -775,17 +1098,20 @@ def _queries_form(config: object) -> str:
 </div>
 """
         )
-    source_rows = "\n".join(
-        "<tr>"
-        f"<td>{html.escape(str(item.get('name') or '-'))}</td>"
-        f"<td>{html.escape(str(item.get('query') or '-'))}</td>"
-        '<td><span class="pill warn">预留</span></td>'
-        "</tr>"
-        for item in source_queries
-    ) or '<tr><td colspan="3" class="muted">还没有预留的外部来源查询。</td></tr>'
+    for index, item in enumerate(source_queries):
+        prefix = f"source_query_{index}_"
+        source_items.append(
+            f"""
+<div class="editable-item">
+  <div><label>名称</label>{_field(prefix + "name", item.get("name", ""))}</div>
+  <div><label>外部来源查询语句</label>{_textarea(prefix + "query", item.get("query", ""), rows=2)}</div>
+</div>
+"""
+        )
     return f"""
 <form method="post" action="/actions/settings/queries" class="settings-form">
   <input type="hidden" name="github_query_count" value="{len(github_queries)}">
+  <input type="hidden" name="source_query_count" value="{len(source_queries)}">
   <h3>当前生效：GitHub 查询</h3>
   <p class="muted">这些查询会在下一次报告中立即用于检索 GitHub 仓库。适合写明确的 GitHub 搜索语法，例如 <span class="file-chip">stars:&gt;=50</span>、<span class="file-chip">created:&gt;=${{date_minus_14}}</span>、<span class="file-chip">pushed:&gt;=${{date_minus_30}}</span>。</p>
   <div class="editable-list">{''.join(github_items)}</div>
@@ -796,12 +1122,16 @@ def _queries_form(config: object) -> str:
       <div><label>查询语句</label>{_textarea("new_github_query", "", rows=2)}</div>
     </div>
   </div>
-  <h3>下一阶段预留：外部来源查询</h3>
-  <div class="helper">当前发布版只做 GitHub 项目雷达，不会自动抓取新闻、公告、监管文件或论文来源。下面的外部查询会保留在配置中，但不会参与本次报告生成，避免把未接入的数据源误当成已启用功能。</div>
-  <table>
-    <thead><tr><th>名称</th><th>预留查询</th><th>状态</th></tr></thead>
-    <tbody>{source_rows}</tbody>
-  </table>
+  <h3>当前生效：外部来源查询</h3>
+  <p class="muted">这些查询会通过 RSS/Atom/公开新闻源检索外部事件，优先筛选官方、监管、研究和高信号来源。也可以直接填写 RSS/Atom URL。</p>
+  <div class="editable-list">{''.join(source_items)}</div>
+  <div class="editable-item">
+    <h3>新增外部来源查询</h3>
+    <div class="row">
+      <div><label>名称</label>{_field("new_source_query_name", "")}</div>
+      <div><label>查询语句或 RSS/Atom URL</label>{_textarea("new_source_query", "", rows=2)}</div>
+    </div>
+  </div>
   <div class="actions"><button class="button" type="submit">保存查询规则</button></div>
 </form>
 """
@@ -815,9 +1145,10 @@ def render_dashboard(paths: RadarPaths, notice: str = "") -> bytes:
     active = _active_job(paths.root)
     status_text = "运行中" if active else state.get("status", "未生成")
     cards = [
-        ("报告", len(reports), "结果页查看 Markdown 和审计 JSON"),
+        ("报告", len(reports), "结果页查看 HTML 阅读版和审计 JSON"),
         ("项目", counts.get("repositories", 0), "本地 SQLite 已记录项目"),
-        ("快照", counts.get("repo_snapshots", 0), "用于计算 3 日增长"),
+        ("外部事件", counts.get("events", 0), "来源采集器筛选出的事件"),
+        ("来源", counts.get("sources", 0), "已记录的公开来源链接"),
         ("任务", status_text, "自动化页查看阶段"),
     ]
     card_html = "\n".join(
@@ -830,14 +1161,19 @@ def render_dashboard(paths: RadarPaths, notice: str = "") -> bytes:
             job_notice = f'<div class="notice bad">最近一次手动运行失败：{html.escape(str(job.get("error", "")))}</div>'
         elif job.get("status") == "completed":
             result = job.get("result") or {}
-            markdown = result.get("markdown") if isinstance(result, dict) else ""
-            job_notice = f'<div class="notice ok">最近一次手动运行已完成。报告：{html.escape(str(markdown))}</div>'
+            report_path = result.get("html") or result.get("markdown") if isinstance(result, dict) else ""
+            job_notice = f'<div class="notice ok">最近一次手动运行已完成。报告：{html.escape(str(report_path))}</div>'
     body = f"""
 {notice}
 {job_notice}
 <h1>操作台</h1>
 <p class="lead">这里是普通用户入口：生成报告、查看结果、设置参数、管理每日自动化。</p>
-<div class="grid grid-4">{card_html}</div>
+<div class="grid grid-5">{card_html}</div>
+
+<section class="section panel">
+  <h2>系统健康</h2>
+  <div class="health-grid">{_health_panel(paths, state)}</div>
+</section>
 
 <section class="section panel">
   <h2>生成今日报告</h2>
@@ -865,12 +1201,14 @@ def render_dashboard(paths: RadarPaths, notice: str = "") -> bytes:
 <section class="section grid grid-2">
   <div class="panel">
     <h2>最新任务阶段</h2>
+    {_failure_hint(state)}
+    {_stage_progress(state)}
     <div class="timeline">{_stage_items(state)}</div>
   </div>
   <div class="panel">
     <h2>最近报告</h2>
     <table>
-      <thead><tr><th>日期</th><th>状态</th><th>大小</th><th>打开</th></tr></thead>
+      <thead><tr><th>日期</th><th>状态</th><th>项目</th><th>事件</th><th>最高信号</th><th>打开</th></tr></thead>
       <tbody>{_report_rows(reports, limit=5)}</tbody>
     </table>
   </div>
@@ -884,11 +1222,16 @@ def render_results(paths: RadarPaths, notice: str = "") -> bytes:
     body = f"""
 {notice}
 <h1>结果</h1>
-<p class="lead">这里集中查看每天的中文报告、机器审计 JSON 和最近的项目分析记录。</p>
+<p class="lead">这里集中查看每天的 HTML 阅读版报告、Markdown 源文件、机器审计 JSON 和最近的项目分析记录。</p>
 <section class="panel">
+  <h2>报告中心</h2>
   <div class="actions" style="margin-bottom: 12px;">{_open_form("reports", "打开报告文件夹")}{_open_form("data", "打开数据库文件夹")}</div>
+  <div class="report-grid">{_report_cards(reports, limit=12)}</div>
+</section>
+<section class="section panel">
+  <h2>报告索引</h2>
   <table>
-    <thead><tr><th>日期</th><th>状态</th><th>大小</th><th>打开</th></tr></thead>
+    <thead><tr><th>日期</th><th>状态</th><th>项目</th><th>事件</th><th>最高信号</th><th>打开</th></tr></thead>
     <tbody>{_report_rows(reports, limit=30)}</tbody>
   </table>
 </section>
@@ -909,30 +1252,16 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
     body = f"""
 {notice}
 <h1>参数</h1>
-<p class="lead">这里可以直接修改参数并保存，不需要再打开配置文件手工编辑。保存后回到操作台立即生成一次报告即可生效。</p>
+<p class="lead">常用设置放在前面，高级查询和评分规则默认折叠。保存后回到操作台立即生成一次报告即可生效。</p>
 
-<section class="grid grid-4">
-  <div class="panel">
-    <h2>1. 改关注方向</h2>
-    <p class="muted">在本页“采集方向”中启用、停用、增加行业和关键词。</p>
-    <div class="helper"><span class="file-chip">直接保存到 config/topics.toml</span></div>
-  </div>
-  <div class="panel">
-    <h2>2. 改搜索规则</h2>
-    <p class="muted">在本页“查询规则”中调整 stars、created、pushed、topic 等条件。</p>
-    <div class="helper"><span class="file-chip">直接保存到 config/queries.toml</span></div>
-  </div>
-  <div class="panel">
-    <h2>3. 接入 LLM</h2>
-    <p class="muted">在本页“LLM API”中填写地址、模型和 Key。</p>
-    <div class="helper"><span class="file-chip">配置保存到 llm.toml，Key 保存到 secrets.env</span></div>
-  </div>
-  <div class="panel">
-    <h2>4. 运行与收获</h2>
-    <p class="muted">在操作台生成报告，在结果页查看 Markdown 和审计 JSON。</p>
-    <div class="actions section"><a class="button" href="/">去操作台</a><a class="button secondary" href="/results">查看结果</a></div>
-  </div>
-</section>
+<div class="settings-tabs">
+  <a href="#run">运行参数</a>
+  <a href="#topics">采集方向</a>
+  <a href="#llm">LLM API</a>
+  <a href="#queries">高级查询</a>
+  <a href="#scoring">评分规则</a>
+  <a href="/automation">每日自动化</a>
+</div>
 
 <section class="section panel">
   <h2>常见目标对照表</h2>
@@ -948,47 +1277,71 @@ def render_settings(paths: RadarPaths, notice: str = "") -> bytes:
   </table>
 </section>
 
-<section class="grid grid-3">
-  <div class="panel">
-    <h2>运行参数</h2>
-    {_radar_settings_form(config)}
-    <div class="helper">
-      <ol class="steps">
-        <li><strong>候选项目数</strong>决定先看多少个 GitHub 候选。</li>
-        <li><strong>深度阅读数</strong>决定读取多少个 README 并打分。</li>
-        <li><strong>报告时区</strong>影响报告日期和每日任务的目标时间。</li>
-      </ol>
-    </div>
+<section id="run" class="section panel">
+  <h2>运行参数</h2>
+  <p class="muted">这里决定每次报告看多少项目、读多深，以及报告日期使用哪个时区。</p>
+  {_radar_settings_form(config)}
+  <div class="helper">
+    <ol class="steps">
+      <li><strong>候选项目数</strong>决定先看多少个 GitHub 候选。</li>
+      <li><strong>深度阅读数</strong>决定读取多少个 README 并打分。</li>
+      <li><strong>报告时区</strong>影响报告日期和每日任务的目标时间。</li>
+    </ol>
   </div>
-  <div class="panel">
-    <h2>评分标准</h2>
+</section>
+
+<section id="topics" class="section panel">
+  <h2>采集方向</h2>
+  <p class="muted">采集方向是“你关心什么”。GitHub 关键词会用于项目搜索；外部来源关键词会用于 RSS/Atom/公开新闻源采集。</p>
+  {_topics_form(config)}
+</section>
+
+<section id="llm" class="section panel">
+  <h2>LLM API</h2>
+  <p class="muted">这是可选能力。不开启时，雷达仍然可以正常生成基础报告。</p>
+  {_llm_form(llm)}
+  <div class="helper">
+    <ol class="steps">
+      <li>API Key 不写进公开配置文件，会保存到本地私有 <span class="file-chip">config/secrets.env</span>。</li>
+      <li>如果你使用 OpenAI 官方 API，base_url 保持默认即可。</li>
+      <li>如果你使用兼容服务，填写服务商提供的 OpenAI-compatible 地址。</li>
+    </ol>
+  </div>
+</section>
+
+<details id="queries" class="section panel disclosure">
+  <summary>高级：精确查询规则</summary>
+  <div class="details-body">
+    <p class="muted">如果你只是添加兴趣方向，优先改“采集方向”。这里适合填写明确的 GitHub 搜索语法、外部 RSS/Atom URL 或更窄的新闻查询。</p>
+    {_queries_form(config)}
+  </div>
+</details>
+
+<details id="scoring" class="section panel disclosure">
+  <summary>高级：评分规则</summary>
+  <div class="details-body">
     <p class="muted">领域相关度、可用性、文档、维护、社区、License、新颖性和 star 增长都在这里调整。</p>
     <div class="helper">想让项目更偏“能马上用”，提高 usability_evidence 和 readme_quality；想追踪爆发项目，提高 star_growth_3d。</div>
     {_scoring_form(config)}
   </div>
+</details>
+
+<section class="section grid grid-3">
   <div class="panel">
-    <h2>LLM API</h2>
-    {_llm_form(llm)}
-    <div class="helper">
-      <ol class="steps">
-        <li>API Key 不写进公开配置文件，会保存到本地私有 <span class="file-chip">config/secrets.env</span>。</li>
-        <li>如果你使用 OpenAI 官方 API，base_url 保持默认即可。</li>
-        <li>如果你使用兼容服务，填写服务商提供的 OpenAI-compatible 地址。</li>
-      </ol>
-    </div>
+    <h2>下一步</h2>
+    <p class="muted">保存参数后，回到操作台生成一次报告，确认候选数量和报告内容符合预期。</p>
+    <div class="actions"><a class="button" href="/">去操作台</a><a class="button secondary" href="/results">查看结果</a></div>
   </div>
-</section>
-
-<section class="section panel">
-  <h2>采集方向</h2>
-  <p class="muted">采集方向是“你关心什么”。GitHub 关键词会立即用于项目搜索；外部来源关键词仅作为下一阶段事件雷达预留。</p>
-  {_topics_form(config)}
-</section>
-
-<section class="section panel">
-  <h2>GitHub 查询</h2>
-  <p class="muted">GitHub 查询是“怎么找”。如果你只是添加兴趣方向，优先改采集方向；如果你明确知道 GitHub 搜索语法，再改这里。外部新闻和公告采集尚未启用，相关配置只做留档。</p>
-  {_queries_form(config)}
+  <div class="panel">
+    <h2>本地文件</h2>
+    <p class="muted">所有配置仍然保存在本地，可以随时打开文件夹检查。</p>
+    <div class="actions">{_open_form("config", "打开配置文件夹")}</div>
+  </div>
+  <div class="panel">
+    <h2>每日自动化</h2>
+    <p class="muted">报告生成时间和任务启停在自动化页管理。</p>
+    <div class="actions"><a class="button secondary" href="/automation">管理自动化</a></div>
+  </div>
 </section>
 """
     return _html_page("GitHub AI Radar Settings", body, active="settings")
@@ -1031,6 +1384,7 @@ def render_automation(paths: RadarPaths, notice: str = "") -> bytes:
       <tr><td>LaunchAgent</td><td>{html.escape(str(schedule.get("plist", "-")))}</td></tr>
       <tr><td>文件是否存在</td><td>{'是' if schedule.get("plist_exists") else '否'}</td></tr>
     </tbody></table>
+    <div class="helper">每日任务由系统 launchd 触发，不依赖 Codex 对话。失败时优先查看下方阶段和日志。</div>
   </div>
   <div class="panel">
     <h2>设置每日生成时间</h2>
@@ -1050,6 +1404,8 @@ def render_automation(paths: RadarPaths, notice: str = "") -> bytes:
 
 <section class="section panel">
   <h2>任务阶段</h2>
+  {_failure_hint(state)}
+  {_stage_progress(state)}
   <div class="timeline">{_stage_items(state)}</div>
 </section>
 
@@ -1080,6 +1436,7 @@ def _status_json(paths: RadarPaths) -> bytes:
                 "date": item["date"],
                 "status": item["status"],
                 "markdown": str(item["markdown"]),
+                "html": str(item["html"]) if item["html"].exists() else None,
                 "audit": str(item["audit"]),
                 "state": str(item["state"]),
             }
@@ -1128,13 +1485,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/report/"):
             date = path.rsplit("/", 1)[-1]
-            report = self.paths.reports_dir / f"{date}.md"
-            if not report.exists():
+            html_report = self.paths.reports_dir / f"{date}.html"
+            markdown = self.paths.reports_dir / f"{date}.md"
+            if html_report.exists():
+                self._send(html_report.read_bytes(), "text/html; charset=utf-8")
+                return
+            if not markdown.exists():
                 self._send(b"report not found", "text/plain; charset=utf-8", 404)
                 return
-            content = html.escape(report.read_text(encoding="utf-8"))
-            body = f'<h1>报告 {html.escape(date)}</h1><p class="lead"><a href="/results">返回结果</a></p><pre>{content}</pre>'
-            self._send(_html_page(f"Report {date}", body, active="results"))
+            content = render_markdown_as_html(markdown.read_text(encoding="utf-8"), title=f"Report {date}")
+            self._send(content.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path.startswith("/markdown/"):
+            date = path.rsplit("/", 1)[-1]
+            markdown = self.paths.reports_dir / f"{date}.md"
+            if not markdown.exists():
+                self._send(b"markdown not found", "text/plain; charset=utf-8", 404)
+                return
+            self._send(markdown.read_bytes(), "text/markdown; charset=utf-8")
             return
         if path.startswith("/audit/"):
             date = path.rsplit("/", 1)[-1]

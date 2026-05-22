@@ -10,6 +10,7 @@ from github_ai_radar.github_client import GitHubClient
 from github_ai_radar.paths import RadarPaths
 from github_ai_radar.reporter import report_payload, verify_report, write_report
 from github_ai_radar.scorer import score_repository
+from github_ai_radar.source_collector import collect_external_sources
 from github_ai_radar.storage import (
     add_run_artifact,
     complete_run,
@@ -18,7 +19,9 @@ from github_ai_radar.storage import (
     fail_running_runs,
     initialize,
     record_review,
+    upsert_event,
     upsert_repository,
+    upsert_source,
     upsert_snapshot,
 )
 
@@ -27,6 +30,7 @@ STAGES = [
     "init",
     "github_search",
     "github_readme_review",
+    "event_sources",
     "scoring",
     "markdown_render",
     "audit_json_render",
@@ -114,8 +118,10 @@ def _run_once_impl(
     report_date = report_day.isoformat()
     state_path = paths.state_dir / f"{report_date}.state.json"
     markdown_path = paths.reports_dir / f"{report_date}.md"
+    html_path = paths.reports_dir / f"{report_date}.html"
     audit_path = paths.reports_dir / f"{report_date}.audit.json"
     raw_github_path = paths.raw_dir / "github" / f"{report_date}.json"
+    raw_sources_path = paths.raw_dir / "sources" / f"{report_date}.json"
 
     state = {
         "report_date": report_date,
@@ -221,6 +227,41 @@ def _run_once_impl(
         }
     )
     state["last_successful_stage"] = "github_readme_review"
+    _write_state(state_path, state)
+
+    topic_source_terms = []
+    for topic in app_config.topics:
+        if not topic.get("enabled"):
+            continue
+        for index, term in enumerate(topic.get("source_terms") or []):
+            topic_source_terms.append(
+                {
+                    "name": f"topic_{topic.get('name', 'custom')}_{index + 1}",
+                    "query": str(term),
+                }
+            )
+    source_events, raw_sources = collect_external_sources(
+        source_queries=app_config.source_queries,
+        topic_terms=topic_source_terms,
+        report_date=report_day,
+        limit=10,
+    )
+    raw_sources_path.write_text(json.dumps(raw_sources, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    add_run_artifact(paths.database, run_id, "raw_sources", str(raw_sources_path))
+    for event in source_events:
+        upsert_source(paths.database, event)
+        upsert_event(paths.database, report_date, event)
+    state["stages"].append(
+        {
+            "name": "event_sources",
+            "status": "completed",
+            "completed_at": datetime.utcnow().isoformat() + "Z",
+            "event_count": len(source_events),
+            "raw_path": str(raw_sources_path),
+        }
+    )
+    state["last_successful_stage"] = "event_sources"
+    _write_state(state_path, state)
     state["stages"].append({"name": "scoring", "status": "completed", "completed_at": datetime.utcnow().isoformat() + "Z"})
     state["last_successful_stage"] = "scoring"
     _write_state(state_path, state)
@@ -231,23 +272,45 @@ def _run_once_impl(
         queries=rendered_queries,
         candidate_count=len(candidates),
         reviews=reviews,
+        external_events=source_events,
+        external_source_queries=[
+            {
+                "name": item.get("name"),
+                "query": item.get("query"),
+                "url": item.get("url"),
+                "item_count": len(item.get("items") or []),
+            }
+            for item in raw_sources.get("queries", [])
+        ],
+        external_source_errors=raw_sources.get("errors", []),
         deep_review_limit=review_limit,
         artifacts={
             "markdown": str(markdown_path),
+            "html": str(html_path),
             "audit_json": str(audit_path),
             "state": str(state_path),
             "raw_github": str(raw_github_path),
+            "raw_sources": str(raw_sources_path),
         },
     )
-    write_report(payload, markdown_path, audit_path)
+    write_report(payload, markdown_path, audit_path, html_path)
     add_run_artifact(paths.database, run_id, "markdown", str(markdown_path))
+    add_run_artifact(paths.database, run_id, "html", str(html_path))
     add_run_artifact(paths.database, run_id, "audit_json", str(audit_path))
-    state["stages"].append({"name": "markdown_render", "status": "completed", "completed_at": datetime.utcnow().isoformat() + "Z", "path": str(markdown_path)})
+    state["stages"].append(
+        {
+            "name": "markdown_render",
+            "status": "completed",
+            "completed_at": datetime.utcnow().isoformat() + "Z",
+            "path": str(markdown_path),
+            "html_path": str(html_path),
+        }
+    )
     state["stages"].append({"name": "audit_json_render", "status": "completed", "completed_at": datetime.utcnow().isoformat() + "Z", "path": str(audit_path)})
     state["last_successful_stage"] = "audit_json_render"
     _write_state(state_path, state)
 
-    verify_report(markdown_path, audit_path)
+    verify_report(markdown_path, audit_path, html_path)
     state["stages"].append({"name": "final_verify", "status": "completed", "completed_at": datetime.utcnow().isoformat() + "Z"})
     state["stages"].append({"name": "completed", "status": "completed", "completed_at": datetime.utcnow().isoformat() + "Z"})
     state["last_successful_stage"] = "completed"
@@ -258,7 +321,9 @@ def _run_once_impl(
         "report_date": report_date,
         "candidate_count": len(candidates),
         "review_count": len(reviews),
+        "event_count": len(source_events),
         "markdown": str(markdown_path),
+        "html": str(html_path),
         "audit_json": str(audit_path),
         "state": str(state_path),
     }

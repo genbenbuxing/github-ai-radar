@@ -1,7 +1,6 @@
 # Add or edit collection directions here without changing Python code.
-# Keep topics concise. Current reports use github_terms immediately. source_terms
-# are saved as planning fields for the next external-source collector and do not
-# affect today's report.
+# Keep topics concise. github_terms feed GitHub repository discovery.
+# source_terms feed the external RSS/Atom/public-news collector used for event sections.
 
 [[topics]]
 name = "ai_applications"

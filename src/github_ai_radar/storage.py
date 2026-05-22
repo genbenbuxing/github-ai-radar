@@ -228,6 +228,67 @@ def add_run_artifact(database: Path, run_id: int, artifact_type: str, path: str)
         )
 
 
+def upsert_source(database: Path, source: dict[str, Any]) -> int:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO sources (url, title, publisher, source_type, fetched_at, trust_notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+              title = excluded.title,
+              publisher = excluded.publisher,
+              source_type = excluded.source_type,
+              fetched_at = excluded.fetched_at,
+              trust_notes = excluded.trust_notes
+            """,
+            (
+                source["url"],
+                source.get("title"),
+                source.get("publisher"),
+                source.get("source_type"),
+                _now(),
+                source.get("trust_notes") or source.get("source_type") or "",
+            ),
+        )
+        row = conn.execute("SELECT id FROM sources WHERE url = ?", (source["url"],)).fetchone()
+        return int(row["id"])
+
+
+def upsert_event(database: Path, event_date: str, event: dict[str, Any]) -> int:
+    with connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO events (
+              event_date, domain, title, url, source_name, summary,
+              facts_json, inference_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_date, url) DO UPDATE SET
+              domain = excluded.domain,
+              title = excluded.title,
+              source_name = excluded.source_name,
+              summary = excluded.summary,
+              facts_json = excluded.facts_json,
+              inference_json = excluded.inference_json
+            """,
+            (
+                event_date,
+                event.get("domain") or "unknown",
+                event["title"],
+                event["url"],
+                event.get("publisher") or event.get("source_name"),
+                event.get("summary"),
+                json.dumps(event.get("facts") or [], ensure_ascii=False),
+                json.dumps([event.get("inference")] if event.get("inference") else [], ensure_ascii=False),
+            ),
+        )
+        row = conn.execute(
+            "SELECT id FROM events WHERE event_date = ? AND url = ?",
+            (event_date, event["url"]),
+        ).fetchone()
+        return int(row["id"])
+
+
 def upsert_repository(database: Path, repo: dict[str, Any], seen_date: str) -> int:
     with connect(database) as conn:
         conn.execute(

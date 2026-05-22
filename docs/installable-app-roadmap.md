@@ -25,7 +25,7 @@ Implemented in v0.2:
 - GitHub candidate search through authenticated `gh`
 - SQLite repository and snapshot storage
 - 3-day, 7-day, and 30-day growth calculation from local history
-- Markdown and audit JSON report generation
+- HTML, Markdown, and audit JSON report generation
 - macOS `launchd` install/status/uninstall commands
 
 ## Stage 2: Native Scheduler Integration
@@ -63,8 +63,9 @@ Implemented in v0.3-v0.4:
 
 - local dashboard on `127.0.0.1`
 - manual report generation from the UI
-- report, audit JSON, status, stage, and log browsing
-- direct settings forms for run parameters, topics, GitHub queries, scoring, and LLM API
+- HTML report, Markdown source, audit JSON, status, stage, and log browsing
+- direct settings forms for run parameters, topics, GitHub queries, external source queries, scoring, and LLM API
+- health checks, report center cards, progress bars, stage explanations, and folded advanced settings
 
 Still planned:
 
@@ -95,6 +96,11 @@ Implemented in v0.4:
 - macOS `.app` installed under `~/Applications`
 - native WebKit app window when Swift is available
 - fallback launcher when Swift is not available
+
+Implemented in v0.5:
+
+- generated pixel cat app icon
+- active external-source event collector inside the app pipeline
 
 Still planned:
 

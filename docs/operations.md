@@ -57,6 +57,8 @@ github-ai-radar app status
 
 When Swift is available at install time, the app opens in a native WebKit window. The same local dashboard remains available at `http://127.0.0.1:8765/` for debugging and automation.
 
+The 操作台 page shows lightweight system health checks for GitHub CLI auth, the database, scheduler, optional LLM API, and the latest report. The 结果 page is the report center: HTML reading reports are primary, with Markdown source and audit JSON kept as secondary actions.
+
 ## Optional LLM API
 
 Copy the example config and keep the real file local:
@@ -82,9 +84,9 @@ config/topics.toml
 config/queries.toml
 ```
 
-`topics.toml` is the friendly place to add directions. Enabled topic `github_terms` contribute simple GitHub searches. `queries.toml` is the precise place for curated GitHub search strings.
+`topics.toml` is the friendly place to add directions. Enabled topic `github_terms` contribute simple GitHub searches, and enabled `source_terms` contribute external RSS/Atom/public-news event searches. `queries.toml` is the precise place for curated GitHub search strings and external source queries.
 
-Current release boundary: external source terms and `source_queries` are preserved for the planned event-source collector, but they do not change the generated report yet. GitHub terms and GitHub queries are the active collection controls.
+Plain text external source queries are read through public RSS/news feeds. Direct RSS/Atom URLs are used as-is. External source results are stored in the audit JSON, raw source artifact, `sources`, and `events`.
 
 ## Artifacts
 
@@ -92,26 +94,29 @@ Generated artifacts should live outside git history:
 
 ```text
 data/radar.sqlite
+reports/github-radar/YYYY-MM-DD.html
 reports/github-radar/YYYY-MM-DD.md
 reports/github-radar/YYYY-MM-DD.audit.json
 reports/github-radar/state/YYYY-MM-DD.state.json
 reports/github-radar/raw/github/YYYY-MM-DD.json
+reports/github-radar/raw/sources/YYYY-MM-DD.json
 ```
 
 ## Health Checks
 
 A completed run must satisfy:
 
-- Markdown report exists and is non-empty.
+- HTML reading report exists and is non-empty.
+- Markdown source report exists and is non-empty.
 - Audit JSON exists and parses.
 - State JSON exists and says `completed`.
-- Key sections are present in Markdown.
-- Raw GitHub search records are linked from the audit JSON artifacts.
+- Key sections are present in HTML and Markdown.
+- Raw GitHub search records and raw external-source records are linked from the audit JSON artifacts.
 
 ## Safety Rules
 
 - Do not clone discovered repositories in phase 1.
 - Do not run install scripts from discovered repositories.
 - Do not pass private tokens into discovered tools.
-- Prefer official, regulatory, company, or primary sources when the planned event collector is added.
+- Prefer official, regulatory, company, or primary sources for external event follow-up.
 - Separate facts from inference in every report.
